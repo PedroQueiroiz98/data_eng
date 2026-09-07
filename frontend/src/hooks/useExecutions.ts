@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelExecution,
+  deleteExecution,
   executeNotebook,
   getExecution,
   getExecutionOutput,
@@ -61,6 +62,14 @@ export function useRetryExecution(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => retryExecution(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function useDeleteExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteExecution(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

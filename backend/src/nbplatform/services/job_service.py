@@ -97,6 +97,19 @@ class JobService:
             raise NotFoundError(f"Job {job_id} não encontrado.")
         return job.status
 
+    async def delete(self, job_id: uuid.UUID) -> None:
+        """Remove um Job terminal (com tarefas/logs/notificações via cascade)."""
+        job = await self.repo.get(job_id)
+        if job is None:
+            raise NotFoundError(f"Job {job_id} não encontrado.")
+        if job.status not in JOB_TERMINAL:
+            raise ConflictError(
+                f"Só é possível excluir um Job terminal (atual: {job.status}). "
+                "Cancele o job antes de excluir."
+            )
+        await self.session.delete(job)
+        await self.session.flush()
+
     async def reset_for_retry(self, job_id: uuid.UUID) -> Job:
         job = await self.repo.get_with_tasks(job_id)
         if job is None:

@@ -1,5 +1,4 @@
 import { screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/utils";
 import { Schedules } from "@/pages/Schedules";
@@ -33,19 +32,16 @@ function mockApi(schedules: unknown[]) {
 }
 
 describe("Schedules page", () => {
-  it("tem alternância Calendário/Lista e mostra o agendamento na lista", async () => {
+  it("mostra os agendamentos direto na lista (sem calendário)", async () => {
     mockApi([schedule]);
     renderWithProviders(<Schedules />);
-
-    // aba padrão = calendário
-    expect(await screen.findByRole("button", { name: /Calendário/ })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: /^Lista$/ }));
 
     await waitFor(() => {
       expect(screen.getByText("*/10 * * * *", { exact: false })).toBeInTheDocument();
       expect(screen.getByText(/A cada 10 min/)).toBeInTheDocument();
     });
+    // não há mais alternância de visualização
+    expect(screen.queryByRole("button", { name: /Calendário/ })).not.toBeInTheDocument();
   });
 
   it("mostra estado vazio", async () => {

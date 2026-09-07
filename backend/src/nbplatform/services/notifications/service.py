@@ -87,7 +87,7 @@ class NotificationService:
             if job is None:
                 return []
             repo = NotificationRepository(session)
-            cfg = await repo.get_config(job.workflow_id)
+            cfg = await self._effective_config(repo, job.workflow_id, event)
             channels = _enabled_channels(cfg, event)
             if not cfg or not channels:
                 logger.info(
@@ -149,7 +149,11 @@ class NotificationService:
             if row.status == NotificationStatus.SENT:
                 return NotificationStatus.SENT  # idempotência: já enviado
 
-            cfg = await repo.get_config(row.workflow_id) if row.workflow_id else None
+            cfg = (
+                await self._effective_config(repo, row.workflow_id, row.event_type)
+                if row.workflow_id
+                else None
+            )
             resolved = resolve(
                 await repo.get_settings_row(), self.settings, self._cipher
             )
@@ -237,6 +241,49 @@ class NotificationService:
                 row.max_attempts = row.attempt + 1
         await self.queue.enqueue(str(notification_id))
 
+    async def _effective_config(
+        self,
+        repo: NotificationRepository,
+        workflow_id: uuid.UUID,
+        event: NotificationEvent,
+    ) -> NotificationConfig | None:
+        """Config do pipeline; se não houver, cai no fallback global (só JOB_FAILED)."""
+        cfg = await repo.get_config(workflow_id)
+        if cfg is not None and _enabled_channels(cfg, event):
+            return cfg
+        if event is not NotificationEvent.JOB_FAILED:
+            return cfg
+
+        row = await repo.get_settings_row()
+        enabled = (
+            row.default_on_failure if row else False
+        ) or self.settings.notify_default_on_failure
+        if not enabled:
+            return cfg
+
+        recipients = (
+            list(row.default_email_recipients)
+            if row and row.default_email_recipients
+            else _split(self.settings.notify_default_email_recipients)
+        )
+        dialog = (
+            (row.default_bitrix_dialog_id if row else "")
+            or self.settings.notify_default_bitrix_dialog_id
+        ).strip() or None
+        if not recipients and not dialog:
+            return cfg
+
+        synthetic = NotificationConfig(workflow_id=workflow_id)
+        synthetic.on_failure = True
+        synthetic.email_enabled = bool(recipients)
+        synthetic.email_recipients = recipients
+        synthetic.email_cc = []
+        synthetic.email_bcc = []
+        synthetic.email_subject = None
+        synthetic.bitrix_enabled = bool(dialog)
+        synthetic.bitrix_dialog_id = dialog
+        return synthetic
+
     async def _send(
         self,
         channel: NotificationChannel,
@@ -250,6 +297,10 @@ class NotificationService:
 
             return ProviderResult.failure("configuração do pipeline removida")
         return await provider.send(message, cfg, resolved)
+
+
+def _split(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _enabled_channels(

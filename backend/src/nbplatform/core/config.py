@@ -83,6 +83,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("NOTIFY_BITRIX_BOT_TOKEN", "BITRIX_BOT_TOKEN"),
     )
+    # Fallback global: notifica falha de pipelines sem config própria.
+    notify_default_on_failure: bool = False
+    notify_default_email_recipients: str = ""  # separados por vírgula
+    notify_default_bitrix_dialog_id: str = ""
 
     redis_queue_notifications: str = "nbp:queue:notifications"
     redis_queue_notifications_processing: str = "nbp:queue:notifications:processing"
@@ -96,6 +100,8 @@ class Settings(BaseSettings):
     worker_heartbeat_interval_s: int = 10
     worker_lease_timeout_s: int = 60
     recovery_interval_s: int = 30
+    # ao excluir uma execução RUNNING: quanto esperar o worker parar de fato
+    execution_delete_cancel_wait_s: float = 20.0
 
     # Política de retry padrão para execuções avulsas (workflow tasks trazem a sua).
     execution_max_retries: int = 2

@@ -118,3 +118,41 @@ async def test_no_config_does_not_create_notifications(client) -> None:
 
     rows = (await client.get(f"/api/jobs/{job['id']}/notifications")).json()
     assert rows == []
+
+
+async def test_global_default_on_failure_notifies_pipelines_without_config(client) -> None:
+    base = {
+        "email_enabled": True,
+        "smtp_host": "smtp.local",
+        "smtp_from": "ci@x.com",
+        "smtp_password": "********",
+        "bitrix_enabled": False,
+    }
+    try:
+        r = await client.put(
+            "/api/notifications/settings",
+            json={
+                **base,
+                "default_on_failure": True,
+                "default_email_recipients": ["oncall@empresa.com"],
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["default_on_failure"] is True
+
+        nb = await make_notebook(client, "failnb3", FAILING_NB)
+        wf = await make_workflow(
+            client, "wf-sem-config", [{"key": "run", "name": "R", "notebook_id": nb}], []
+        )
+        job = (await client.post(f"/api/workflows/{wf}/run", json={})).json()
+        assert await drive_job(job["id"]) == "FAILED"
+
+        rows = (await client.get(f"/api/jobs/{job['id']}/notifications")).json()
+        assert [r["channel"] for r in rows] == ["EMAIL"]
+        assert rows[0]["event_type"] == "JOB_FAILED"
+        assert "oncall@empresa.com" in (rows[0]["recipient"] or "")
+    finally:
+        await client.put(
+            "/api/notifications/settings",
+            json={**base, "default_on_failure": False, "default_email_recipients": []},
+        )

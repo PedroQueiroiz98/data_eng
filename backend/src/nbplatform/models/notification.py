@@ -74,6 +74,15 @@ class NotificationSettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     bitrix_bot_id: Mapped[str | None] = mapped_column(String(120))
     bitrix_bot_token_ct: Mapped[str | None] = mapped_column(Text)  # Fernet
 
+    # Fallback: notifica falha de qualquer pipeline sem NotificationConfig próprio.
+    default_on_failure: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    default_email_recipients: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, nullable=False
+    )
+    default_bitrix_dialog_id: Mapped[str | None] = mapped_column(String(120))
+
 
 class Notification(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     """Histórico de envio (spec §14)."""

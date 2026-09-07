@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { bulkFailureReport } from "@/components/bulkReport";
 import { useCreateNotebook, useDeleteNotebook, useNotebooks } from "@/hooks/useNotebooks";
+import { bulkRun, bulkSuccessMessage } from "@/lib/bulk";
 import { executeNotebook } from "@/lib/executions";
-import type { Notebook } from "@/lib/notebooks";
+import { deleteNotebook, type Notebook } from "@/lib/notebooks";
 import {
   ActionMenu,
   Button,
@@ -13,6 +16,7 @@ import {
   IconButton,
   PageHeader,
   TextField,
+  useAlert,
   useConfirm,
   useToast,
 } from "@/ui";
@@ -29,9 +33,34 @@ export function Notebooks() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const alert = useAlert();
+  const qc = useQueryClient();
   const { data: notebooks, isLoading, isError } = useNotebooks();
   const create = useCreateNotebook();
   const remove = useDeleteNotebook();
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const nameOf = (id: string) =>
+    notebooks?.find((n) => n.id === id)?.name ?? id.slice(0, 8);
+
+  const bulkDelete = async (ids: string[], clear: () => void) => {
+    if (
+      !(await confirm({
+        title: "Excluir notebooks",
+        message: `Excluir ${ids.length} notebook(s) e todas as suas versões? Esta ação não pode ser desfeita.`,
+        confirmLabel: "Excluir",
+        danger: true,
+      }))
+    )
+      return;
+    setBulkBusy(true);
+    const res = await bulkRun(ids, deleteNotebook);
+    setBulkBusy(false);
+    await qc.invalidateQueries({ queryKey: ["notebooks"] });
+    clear();
+    if (res.ok > 0) toast.success(bulkSuccessMessage(res.ok, "notebook"));
+    if (res.failed > 0) await alert(bulkFailureReport(res, ids.length, "notebooks", nameOf));
+  };
 
   const [dialog, setDialog] = useState(false);
   const [name, setName] = useState("");
@@ -166,6 +195,18 @@ export function Notebooks() {
           loading={isLoading}
           onRowClick={(n) => navigate(`/notebooks/${n.id}`)}
           searchPlaceholder="Pesquisar notebooks"
+          selectable
+          bulkActions={(ids, clear) => (
+            <Button
+              size="sm"
+              variant="danger"
+              loading={bulkBusy}
+              icon={<DeleteIcon className="h-4 w-4" />}
+              onClick={() => void bulkDelete(ids, clear)}
+            >
+              Excluir {ids.length}
+            </Button>
+          )}
           empty={
             <EmptyState
               icon={NotebookIcon}

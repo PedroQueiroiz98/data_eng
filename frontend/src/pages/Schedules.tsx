@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { bulkFailureReport } from "@/components/bulkReport";
 import {
   useCreateSchedule,
   useDeleteSchedule,
@@ -7,14 +9,14 @@ import {
   useUpdateSchedule,
 } from "@/hooks/useSchedules";
 import { useWorkflows } from "@/hooks/useWorkflows";
+import { bulkRun, bulkSuccessMessage } from "@/lib/bulk";
 import { runWorkflow } from "@/lib/jobs";
-import type { Schedule } from "@/lib/schedules";
+import { deleteSchedule, type Schedule } from "@/lib/schedules";
 import {
   buildCron,
   DEFAULT_PARTS,
   describeCron,
   isValidCron,
-  occurrencesInMonth,
   type FreqParts,
   type Frequency,
 } from "@/lib/cron";
@@ -31,19 +33,11 @@ import {
   StatusChip,
   Switch,
   TextField,
+  useAlert,
   useConfirm,
   useToast,
 } from "@/ui";
-import {
-  AddIcon,
-  BackIcon,
-  ChevronRightIcon,
-  DeleteIcon,
-  EditIcon,
-  PauseIcon,
-  RunIcon,
-  ScheduleIcon,
-} from "@/ui/icons";
+import { AddIcon, DeleteIcon, EditIcon, PauseIcon, RunIcon, ScheduleIcon } from "@/ui/icons";
 
 const FREQS: { value: Frequency; label: string }[] = [
   { value: "once", label: "Uma vez" },
@@ -54,8 +48,6 @@ const FREQS: { value: Frequency; label: string }[] = [
   { value: "custom", label: "Cron personalizado" },
 ];
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-
-// ─── formulário (dialog) ─────────────────────────────────────────────────────
 
 interface FormState {
   workflowId: string;
@@ -70,6 +62,7 @@ function ScheduleFormDialog({
   open,
   onClose,
   initial,
+  editing,
   workflows,
   onSubmit,
   saving,
@@ -77,8 +70,9 @@ function ScheduleFormDialog({
   open: boolean;
   onClose: () => void;
   initial?: Partial<FormState>;
+  editing: boolean;
   workflows: { id: string; name: string }[];
-  onSubmit: (s: FormState) => void;
+  onSubmit: (s: FormState, addAnother: boolean) => void;
   saving: boolean;
 }) {
   const [s, setS] = useState<FormState>({
@@ -97,22 +91,29 @@ function ScheduleFormDialog({
     setS((prev) => ({ ...prev, parts: { ...prev.parts, ...patch } }));
 
   const valid = s.workflowId && isValidCron(effectiveCron);
+  const emit = (addAnother: boolean) => onSubmit({ ...s, cron: effectiveCron }, addAnother);
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      title={initial?.workflowId ? "Editar agendamento" : "Novo agendamento"}
+      title={editing ? "Editar agendamento" : "Novo agendamento"}
       footer={
         <>
           <Button variant="text" onClick={onClose}>
             Cancelar
           </Button>
-          <Button
-            loading={saving}
-            disabled={!valid}
-            onClick={() => onSubmit({ ...s, cron: effectiveCron })}
-          >
+          {!editing && (
+            <Button
+              variant="outlined"
+              loading={saving}
+              disabled={!valid}
+              onClick={() => emit(true)}
+            >
+              Salvar e adicionar outro
+            </Button>
+          )}
+          <Button loading={saving} disabled={!valid} onClick={() => emit(false)}>
             Salvar
           </Button>
         </>
@@ -224,150 +225,47 @@ function ScheduleFormDialog({
   );
 }
 
-// ─── calendário ─────────────────────────────────────────────────────────────
-
-interface CalEvent {
-  schedule: Schedule;
-  date: Date;
-}
-
-function ScheduleCalendar({
-  schedules,
-  wfName,
-  onSelect,
-}: {
-  schedules: Schedule[];
-  wfName: (id: string) => string;
-  onSelect: (s: Schedule) => void;
-}) {
-  const [cursor, setCursor] = useState(() => {
-    const n = new Date();
-    return { y: n.getFullYear(), m: n.getMonth() };
-  });
-
-  const events = useMemo<CalEvent[]>(() => {
-    const out: CalEvent[] = [];
-    for (const s of schedules) {
-      if (!s.enabled) continue;
-      for (const date of occurrencesInMonth(s.cron, s.timezone, cursor.y, cursor.m)) {
-        out.push({ schedule: s, date });
-      }
-    }
-    return out.sort((a, b) => a.date.getTime() - b.date.getTime());
-  }, [schedules, cursor]);
-
-  const byDay = useMemo(() => {
-    const map = new Map<number, CalEvent[]>();
-    for (const e of events) {
-      const day = e.date.getDate();
-      if (!map.has(day)) map.set(day, []);
-      map.get(day)!.push(e);
-    }
-    return map;
-  }, [events]);
-
-  const first = new Date(cursor.y, cursor.m, 1);
-  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
-  const leading = first.getDay();
-  const cells: (number | null)[] = [
-    ...Array.from({ length: leading }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const monthLabel = first.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-  const today = new Date();
-  const isToday = (d: number) =>
-    today.getFullYear() === cursor.y && today.getMonth() === cursor.m && today.getDate() === d;
-
-  return (
-    <div className="surface p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold capitalize text-fg">{monthLabel}</h2>
-        <div className="flex gap-1">
-          <IconButton
-            label="Mês anterior"
-            size="sm"
-            icon={<BackIcon className="h-4 w-4" />}
-            onClick={() =>
-              setCursor((c) => (c.m === 0 ? { y: c.y - 1, m: 11 } : { ...c, m: c.m - 1 }))
-            }
-          />
-          <IconButton
-            label="Próximo mês"
-            size="sm"
-            icon={<ChevronRightIcon className="h-4 w-4" />}
-            onClick={() =>
-              setCursor((c) => (c.m === 11 ? { y: c.y + 1, m: 0 } : { ...c, m: c.m + 1 }))
-            }
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-7 gap-px overflow-hidden rounded border border-surface-border bg-surface-border text-xs">
-        {WEEKDAYS.map((d) => (
-          <div key={d} className="bg-surface-variant px-2 py-1.5 text-center font-medium text-fg-muted">
-            {d}
-          </div>
-        ))}
-        {cells.map((day, i) => (
-          <div
-            key={i}
-            className={`min-h-[92px] bg-surface p-1.5 ${day == null ? "opacity-40" : ""}`}
-          >
-            {day != null && (
-              <>
-                <div
-                  className={`mb-1 text-right text-[11px] ${
-                    isToday(day)
-                      ? "inline-block rounded-full bg-primary px-1.5 text-primary-fg"
-                      : "text-fg-faint"
-                  }`}
-                >
-                  {day}
-                </div>
-                <div className="space-y-1">
-                  {(byDay.get(day) ?? []).slice(0, 3).map((e, j) => (
-                    <button
-                      key={j}
-                      type="button"
-                      onClick={() => onSelect(e.schedule)}
-                      className="block w-full truncate rounded bg-primary-container px-1.5 py-0.5 text-left text-[11px] text-primary-on-container hover:brightness-95"
-                      title={`${wfName(e.schedule.workflow_id)} · ${e.date.toLocaleTimeString()}`}
-                    >
-                      {e.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{" "}
-                      {wfName(e.schedule.workflow_id)}
-                    </button>
-                  ))}
-                  {(byDay.get(day)?.length ?? 0) > 3 && (
-                    <div className="text-[10px] text-fg-faint">
-                      +{(byDay.get(day)!.length - 3)} mais
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── página ─────────────────────────────────────────────────────────────────
-
 export function Schedules() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const alert = useAlert();
+  const qc = useQueryClient();
   const { data: schedules, isLoading, isError } = useSchedules();
   const { data: workflows } = useWorkflows();
   const create = useCreateSchedule();
   const update = useUpdateSchedule();
   const remove = useDeleteSchedule();
+  const [bulkBusy, setBulkBusy] = useState(false);
 
-  const [tab, setTab] = useState<"calendar" | "list">("calendar");
+  const bulkDelete = async (ids: string[], clear: () => void) => {
+    if (
+      !(await confirm({
+        title: "Excluir agendamentos",
+        message: `Excluir ${ids.length} agendamento(s)?`,
+        confirmLabel: "Excluir",
+        danger: true,
+      }))
+    )
+      return;
+    setBulkBusy(true);
+    const res = await bulkRun(ids, deleteSchedule);
+    setBulkBusy(false);
+    await qc.invalidateQueries({ queryKey: ["schedules"] });
+    clear();
+    if (res.ok > 0) toast.success(bulkSuccessMessage(res.ok, "agendamento"));
+    if (res.failed > 0) {
+      const label = (id: string) => {
+        const s = schedules?.find((x) => x.id === id);
+        return s ? `${wfName(s.workflow_id)} · ${s.cron}` : id.slice(0, 8);
+      };
+      await alert(bulkFailureReport(res, ids.length, "agendamentos", label));
+    }
+  };
+
   const [formOpen, setFormOpen] = useState(false);
+  const [formNonce, setFormNonce] = useState(0);
+  const [keepWorkflowId, setKeepWorkflowId] = useState("");
   const [editing, setEditing] = useState<Schedule | null>(null);
   const [detail, setDetail] = useState<Schedule | null>(null);
 
@@ -376,15 +274,18 @@ export function Schedules() {
 
   const openCreate = () => {
     setEditing(null);
+    setKeepWorkflowId("");
+    setFormNonce((n) => n + 1);
     setFormOpen(true);
   };
   const openEdit = (s: Schedule) => {
     setDetail(null);
     setEditing(s);
+    setFormNonce((n) => n + 1);
     setFormOpen(true);
   };
 
-  const submit = (f: FormState) => {
+  const submit = (f: FormState, addAnother: boolean) => {
     if (editing) {
       update.mutate(
         { id: editing.id, cron: f.cron, timezone: f.timezone, enabled: f.enabled },
@@ -396,18 +297,23 @@ export function Schedules() {
           onError: (e) => toast.error((e as Error).message),
         },
       );
-    } else {
-      create.mutate(
-        { workflow_id: f.workflowId, cron: f.cron, timezone: f.timezone, enabled: f.enabled },
-        {
-          onSuccess: () => {
-            toast.success("Agendamento criado");
-            setFormOpen(false);
-          },
-          onError: (e) => toast.error((e as Error).message),
-        },
-      );
+      return;
     }
+    create.mutate(
+      { workflow_id: f.workflowId, cron: f.cron, timezone: f.timezone, enabled: f.enabled },
+      {
+        onSuccess: () => {
+          toast.success("Agendamento criado");
+          if (addAnother) {
+            setKeepWorkflowId(f.workflowId);
+            setFormNonce((n) => n + 1); // remonta o form limpo, mantendo o workflow
+          } else {
+            setFormOpen(false);
+          }
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
   };
 
   const toggle = (s: Schedule) =>
@@ -532,29 +438,13 @@ export function Schedules() {
     <div>
       <PageHeader
         title="Agendamentos"
-        subtitle="Execuções automáticas de workflows (cron)."
+        subtitle="Execuções automáticas de workflows (cron). Um workflow pode ter vários agendamentos."
         actions={
           <Button icon={<AddIcon className="h-4 w-4" />} onClick={openCreate}>
             Novo Agendamento
           </Button>
         }
       />
-
-      <div className="mb-4 inline-flex rounded-md border border-surface-border bg-surface p-0.5 text-sm">
-        {(["calendar", "list"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 ${
-              tab === t ? "bg-primary-container text-primary-on-container" : "text-fg-muted"
-            }`}
-          >
-            <ScheduleIcon className="h-4 w-4" />
-            {t === "calendar" ? "Calendário" : "Lista"}
-          </button>
-        ))}
-      </div>
 
       {isError ? (
         <p className="text-sm text-danger">Falha ao carregar agendamentos.</p>
@@ -571,22 +461,28 @@ export function Schedules() {
             </Button>
           }
         />
-      ) : tab === "calendar" ? (
-        <ScheduleCalendar
-          schedules={schedules ?? []}
-          wfName={wfName}
-          onSelect={(s) => setDetail(s)}
-        />
       ) : (
         <DataTable
           columns={columns}
           rows={schedules}
           rowKey={(s) => s.id}
           onRowClick={(s) => setDetail(s)}
+          searchPlaceholder="Pesquisar agendamentos"
+          selectable
+          bulkActions={(ids, clear) => (
+            <Button
+              size="sm"
+              variant="danger"
+              loading={bulkBusy}
+              icon={<DeleteIcon className="h-4 w-4" />}
+              onClick={() => void bulkDelete(ids, clear)}
+            >
+              Excluir {ids.length}
+            </Button>
+          )}
         />
       )}
 
-      {/* detalhe do agendamento */}
       <Dialog
         open={detail !== null}
         onClose={() => setDetail(null)}
@@ -645,8 +541,10 @@ export function Schedules() {
 
       {formOpen && (
         <ScheduleFormDialog
+          key={formNonce}
           open={formOpen}
           onClose={() => setFormOpen(false)}
+          editing={editing !== null}
           workflows={wfList}
           saving={create.isPending || update.isPending}
           onSubmit={submit}
@@ -659,7 +557,9 @@ export function Schedules() {
                   timezone: editing.timezone,
                   enabled: editing.enabled,
                 }
-              : undefined
+              : keepWorkflowId
+                ? { workflowId: keepWorkflowId }
+                : undefined
           }
         />
       )}

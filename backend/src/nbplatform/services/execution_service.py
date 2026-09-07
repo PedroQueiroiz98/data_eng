@@ -2,18 +2,35 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nbplatform.core.errors import ConflictError, NotFoundError
+from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import ExecutionStatus, LogLevel
 from nbplatform.domain.state_machine import assert_transition
 from nbplatform.models.execution import Execution, ExecutionLog
+from nbplatform.models.job import JobTask
+from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.repositories.execution_repository import ExecutionRepository
 from nbplatform.repositories.notebook_repository import NotebookRepository
+
+# "execução encerrada" — pode ser excluída (RUNNING/QUEUED não).
+_DELETABLE_STATES = frozenset(
+    {
+        ExecutionStatus.SUCCESS,
+        ExecutionStatus.FAILED,
+        ExecutionStatus.CANCELLED,
+        ExecutionStatus.TIMEOUT,
+    }
+)
 
 
 def _now() -> datetime:
@@ -96,6 +113,61 @@ class ExecutionService:
         status: ExecutionStatus | None,
     ) -> list[Execution]:
         return await self.repo.list_paged(limit=limit, offset=offset, status=status)
+
+    async def _assert_not_owned_by_job(self, execution_id: uuid.UUID) -> None:
+        owned = await self.session.scalar(
+            select(JobTask.id).where(JobTask.execution_id == execution_id).limit(1)
+        )
+        if owned is not None:
+            raise ConflictError(
+                "Esta execução pertence a um job. Exclua o job para remover suas execuções."
+            )
+
+    async def cancel_for_delete(
+        self, execution_id: uuid.UUID, redis: Redis, *, wait_s: float
+    ) -> None:
+        """Se a execução está QUEUED/RUNNING, cancela e espera ela encerrar.
+
+        QUEUED → CANCELLED direto. RUNNING → sinaliza o worker e faz polling até
+        chegar a um estado encerrado (ou levanta ConflictError no timeout).
+        """
+        execution = await self.get(execution_id)
+        await self._assert_not_owned_by_job(execution_id)
+        if execution.status in _DELETABLE_STATES:
+            return
+
+        queue = ExecutionQueue(redis)
+        if execution.status == ExecutionStatus.QUEUED:
+            await self.cancel(execution_id)  # QUEUED → CANCELLED
+            await self.session.commit()
+            await queue.request_cancel(str(execution_id))
+            return
+
+        # RUNNING: pede o cancelamento e aguarda o worker parar
+        await queue.request_cancel(str(execution_id))
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.5)
+            async with session_scope() as check:
+                current = await check.get(Execution, execution_id)
+                if current is None or current.status in _DELETABLE_STATES:
+                    return
+        raise ConflictError(
+            "Cancelamento solicitado, mas a execução ainda não parou. "
+            "Tente excluir novamente em instantes."
+        )
+
+    async def delete(self, execution_id: uuid.UUID) -> None:
+        """Remove uma execução encerrada (logs via cascade). RUNNING/QUEUED → 409."""
+        execution = await self.get(execution_id)
+        if execution.status not in _DELETABLE_STATES:
+            raise ConflictError(
+                f"Só é possível excluir uma execução encerrada (atual: {execution.status}). "
+                "Cancele a execução antes de excluir."
+            )
+        await self._assert_not_owned_by_job(execution_id)
+        await self.session.delete(execution)
+        await self.session.flush()
 
     async def logs_since(
         self, execution_id: uuid.UUID, *, after_seq: int

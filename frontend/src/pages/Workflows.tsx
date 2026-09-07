@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { bulkFailureReport } from "@/components/bulkReport";
 import { useCreateWorkflow, useDeleteWorkflow, useWorkflows } from "@/hooks/useWorkflows";
+import { bulkRun, bulkSuccessMessage } from "@/lib/bulk";
 import { runWorkflow } from "@/lib/jobs";
-import type { Workflow } from "@/lib/workflows";
+import { deleteWorkflow, type Workflow } from "@/lib/workflows";
 import {
   ActionMenu,
   Button,
@@ -14,6 +17,7 @@ import {
   PageHeader,
   StatusChip,
   TextField,
+  useAlert,
   useConfirm,
   useToast,
 } from "@/ui";
@@ -23,12 +27,36 @@ export function Workflows() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const alert = useAlert();
+  const qc = useQueryClient();
   const { data, isLoading, isError } = useWorkflows();
   const create = useCreateWorkflow();
   const remove = useDeleteWorkflow();
 
   const [dialog, setDialog] = useState(false);
   const [name, setName] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const nameOf = (id: string) => data?.find((w) => w.id === id)?.name ?? id.slice(0, 8);
+
+  const bulkDelete = async (ids: string[], clear: () => void) => {
+    if (
+      !(await confirm({
+        title: "Excluir workflows",
+        message: `Excluir ${ids.length} workflow(s)?`,
+        confirmLabel: "Excluir",
+        danger: true,
+      }))
+    )
+      return;
+    setBulkBusy(true);
+    const res = await bulkRun(ids, deleteWorkflow);
+    setBulkBusy(false);
+    await qc.invalidateQueries({ queryKey: ["workflows"] });
+    clear();
+    if (res.ok > 0) toast.success(bulkSuccessMessage(res.ok, "workflow"));
+    if (res.failed > 0) await alert(bulkFailureReport(res, ids.length, "workflows", nameOf));
+  };
 
   const submit = async () => {
     const trimmed = name.trim();
@@ -148,6 +176,18 @@ export function Workflows() {
           loading={isLoading}
           onRowClick={(w) => navigate(`/workflows/${w.id}`)}
           searchPlaceholder="Pesquisar workflows"
+          selectable
+          bulkActions={(ids, clear) => (
+            <Button
+              size="sm"
+              variant="danger"
+              loading={bulkBusy}
+              icon={<DeleteIcon className="h-4 w-4" />}
+              onClick={() => void bulkDelete(ids, clear)}
+            >
+              Excluir {ids.length}
+            </Button>
+          )}
           empty={
             <EmptyState
               icon={WorkflowIcon}

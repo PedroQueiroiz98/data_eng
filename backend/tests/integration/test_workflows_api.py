@@ -52,6 +52,18 @@ async def test_crud_lifecycle(client) -> None:
     assert (await client.get(f"/api/workflows/{wf_id}")).status_code == 404
 
 
+async def test_delete_workflow_with_jobs_is_409(client) -> None:
+    nb = await _notebook(client)
+    wf_id = await _workflow(client, name="ETL-com-jobs")
+    await client.put(f"/api/workflows/{wf_id}/graph", json=_graph(nb))
+    await client.post(f"/api/workflows/{wf_id}/run", json={})
+
+    resp = await client.delete(f"/api/workflows/{wf_id}")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["error"]["code"] == "conflict"
+    assert (await client.get(f"/api/workflows/{wf_id}")).status_code == 200
+
+
 async def test_save_valid_graph(client) -> None:
     wf_id = await _workflow(client)
     nb = await _notebook(client)

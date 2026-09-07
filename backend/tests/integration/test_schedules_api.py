@@ -38,6 +38,18 @@ async def test_crud_lifecycle(client) -> None:
     assert (await client.get(f"/api/schedules/{sched['id']}")).status_code == 404
 
 
+async def test_multiple_schedules_per_workflow(client) -> None:
+    wf = await _workflow(client)
+    a = await client.post("/api/schedules", json={"workflow_id": wf, "cron": "0 8 * * *"})
+    b = await client.post("/api/schedules", json={"workflow_id": wf, "cron": "0 20 * * 1-5"})
+    assert a.status_code == 201 and b.status_code == 201
+    assert a.json()["id"] != b.json()["id"]
+
+    listing = (await client.get(f"/api/schedules?workflow_id={wf}")).json()
+    crons = sorted(s["cron"] for s in listing if s["workflow_id"] == wf)
+    assert crons == ["0 20 * * 1-5", "0 8 * * *"]
+
+
 async def test_invalid_cron_rejected(client) -> None:
     wf = await _workflow(client)
     resp = await client.post(

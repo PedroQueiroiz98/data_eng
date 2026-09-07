@@ -91,6 +91,16 @@ async def get_settings_read(session: AsyncSession) -> NotificationSettingsRead:
         bitrix_bot_token_masked=MASK
         if (row and row.bitrix_bot_token_ct) or s.notify_bitrix_bot_token
         else "",
+        default_on_failure=(row.default_on_failure if row else False)
+        or s.notify_default_on_failure,
+        default_email_recipients=(
+            list(row.default_email_recipients)
+            if row and row.default_email_recipients
+            else [e.strip() for e in s.notify_default_email_recipients.split(",") if e.strip()]
+        ),
+        default_bitrix_dialog_id=pick(
+            row.default_bitrix_dialog_id if row else None, s.notify_default_bitrix_dialog_id
+        ),
     )
 
 
@@ -115,6 +125,12 @@ async def put_settings(
     row.bitrix_bot_id = payload.bitrix_bot_id or None
     if not _keep_secret(payload.bitrix_bot_token):
         row.bitrix_bot_token_ct = cipher.encrypt(payload.bitrix_bot_token or "")
+
+    row.default_on_failure = payload.default_on_failure
+    row.default_email_recipients = [
+        e.strip() for e in payload.default_email_recipients if e.strip()
+    ]
+    row.default_bitrix_dialog_id = (payload.default_bitrix_dialog_id or "").strip() or None
 
     await session.flush()
     return await get_settings_read(session)

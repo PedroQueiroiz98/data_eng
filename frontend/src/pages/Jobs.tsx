@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { bulkFailureReport } from "@/components/bulkReport";
 import { RunCard } from "@/components/jobs/RunCard";
-import { useJobs } from "@/hooks/useJobs";
+import { useDeleteJob, useJobs } from "@/hooks/useJobs";
 import { useWorkflows } from "@/hooks/useWorkflows";
-import type { Job, JobStatus } from "@/lib/jobs";
-import { EmptyState, PageHeader, Skeleton } from "@/ui";
-import { JobsIcon, SearchIcon } from "@/ui/icons";
+import { bulkRun, bulkSuccessMessage } from "@/lib/bulk";
+import { deleteJob, type Job, type JobStatus } from "@/lib/jobs";
+import { Button, EmptyState, PageHeader, Skeleton, useAlert, useConfirm, useToast } from "@/ui";
+import { DeleteIcon, JobsIcon, SearchIcon } from "@/ui/icons";
 
 const STATUS_FILTERS: (JobStatus | "ALL")[] = [
   "ALL",
@@ -36,8 +39,66 @@ function runNumbers(jobs: Job[]): Map<string, number> {
 export function Jobs() {
   const { data, isLoading, isError } = useJobs();
   const { data: workflows } = useWorkflows();
+  const del = useDeleteJob();
+  const confirm = useConfirm();
+  const alert = useAlert();
+  const toast = useToast();
+  const qc = useQueryClient();
   const [status, setStatus] = useState<(typeof STATUS_FILTERS)[number]>("ALL");
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const toggleSelect = (job: Job) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(job.id)) next.delete(job.id);
+      else next.add(job.id);
+      return next;
+    });
+
+  const onDelete = async (job: Job) => {
+    if (
+      await confirm({
+        title: "Excluir execução",
+        message: "Excluir esta execução e seu histórico (tarefas, logs, notificações)?",
+        confirmLabel: "Excluir",
+        danger: true,
+      })
+    ) {
+      del.mutate(job.id, {
+        onSuccess: () => toast.success("Execução excluída"),
+        onError: (e) => toast.error((e as Error).message),
+      });
+    }
+  };
+
+  const bulkDelete = async (ids: string[]) => {
+    if (
+      !(await confirm({
+        title: "Excluir execuções",
+        message: `Excluir ${ids.length} execução(ões) e o histórico? Execuções em andamento são ignoradas.`,
+        confirmLabel: "Excluir",
+        danger: true,
+      }))
+    )
+      return;
+    setBulkBusy(true);
+    const res = await bulkRun(ids, deleteJob);
+    setBulkBusy(false);
+    await qc.invalidateQueries({ queryKey: ["jobs"] });
+    setSelected(new Set());
+    if (res.ok > 0) toast.success(bulkSuccessMessage(res.ok, "execução"));
+    if (res.failed > 0) {
+      const label = (id: string) => {
+        const j = data?.find((x) => x.id === id);
+        return j
+          ? `${wfName.get(j.workflow_id) ?? j.workflow_id.slice(0, 8)} #${runNo.get(id) ?? "?"}`
+          : id.slice(0, 8);
+      };
+      await alert(bulkFailureReport(res, ids.length, "execuções", label));
+    }
+  };
 
   const wfName = useMemo(() => {
     const m = new Map<string, string>();
@@ -56,6 +117,17 @@ export function Jobs() {
       return name.includes(q) || j.id.toLowerCase().includes(q);
     });
   }, [data, status, query, wfName]);
+
+  const filteredIds = useMemo(() => filtered.map((j) => j.id), [filtered]);
+  const selectedIds = filteredIds.filter((id) => selected.has(id));
+  const allSelected = filteredIds.length > 0 && selectedIds.length === filteredIds.length;
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) filteredIds.forEach((id) => next.delete(id));
+      else filteredIds.forEach((id) => next.add(id));
+      return next;
+    });
 
   return (
     <div>
@@ -106,12 +178,42 @@ export function Jobs() {
         />
       ) : (
         <div className="space-y-2">
+          <div className="flex items-center gap-3 px-1 text-xs text-fg-muted">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+              selecionar todas
+            </label>
+            {selectedIds.length > 0 && (
+              <>
+                <span>{selectedIds.length} selecionada(s)</span>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  loading={bulkBusy}
+                  icon={<DeleteIcon className="h-4 w-4" />}
+                  onClick={() => void bulkDelete(selectedIds)}
+                >
+                  Excluir {selectedIds.length}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  className="hover:text-fg"
+                >
+                  limpar
+                </button>
+              </>
+            )}
+          </div>
           {filtered.map((j) => (
             <RunCard
               key={j.id}
               job={j}
               pipelineName={wfName.get(j.workflow_id) ?? j.workflow_id.slice(0, 8)}
               runNumber={runNo.get(j.id)}
+              onDelete={onDelete}
+              selected={selected.has(j.id)}
+              onToggleSelect={toggleSelect}
             />
           ))}
         </div>

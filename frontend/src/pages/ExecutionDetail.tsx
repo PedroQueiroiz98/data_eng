@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { LogTerminal } from "@/components/LogTerminal";
 import { NotebookOutputView } from "@/components/notebook/NotebookOutputView";
 import {
   useCancelExecution,
+  useDeleteExecution,
   useExecution,
   useExecutionOutput,
   useRetryExecution,
@@ -17,7 +18,7 @@ import {
 } from "@/lib/executions";
 import { openExecutionSocket } from "@/lib/ws";
 import { Button, Card, PageHeader, StatusChip, useConfirm, useToast } from "@/ui";
-import { RetryIcon, StopIcon } from "@/ui/icons";
+import { DeleteIcon, RetryIcon, StopIcon } from "@/ui/icons";
 
 function fmt(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleString() : "—";
@@ -25,10 +26,12 @@ function fmt(iso: string | null | undefined): string {
 
 export function ExecutionDetail() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
   const cancel = useCancelExecution(id);
   const retry = useRetryExecution(id);
+  const remove = useDeleteExecution();
 
   const [status, setStatus] = useState<ExecutionStatus | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -102,6 +105,29 @@ export function ExecutionDetail() {
     setReopenNonce((n) => n + 1);
   };
 
+  const onDelete = async () => {
+    const running =
+      !!effectiveStatus && (effectiveStatus === "RUNNING" || effectiveStatus === "QUEUED");
+    if (
+      await confirm({
+        title: "Excluir execução",
+        message: running
+          ? "A execução será cancelada e depois excluída."
+          : "Excluir esta execução e seus logs?",
+        confirmLabel: running ? "Cancelar e excluir" : "Excluir",
+        danger: true,
+      })
+    ) {
+      remove.mutate(id, {
+        onSuccess: () => {
+          toast.success("Execução excluída");
+          navigate("/executions");
+        },
+        onError: (e) => toast.error((e as Error).message),
+      });
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -141,6 +167,17 @@ export function ExecutionDetail() {
                 onClick={onRetry}
               >
                 Reexecutar
+              </Button>
+            )}
+            {effectiveStatus && (
+              <Button
+                variant="outlined"
+                size="sm"
+                icon={<DeleteIcon className="h-4 w-4" />}
+                loading={remove.isPending}
+                onClick={onDelete}
+              >
+                Excluir
               </Button>
             )}
           </>

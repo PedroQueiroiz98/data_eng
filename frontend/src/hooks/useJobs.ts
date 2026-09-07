@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cancelJob, getJob, listJobs, retryJob, runWorkflow } from "@/lib/jobs";
+import { cancelJob, deleteJob, getJob, listJobs, retryJob, runWorkflow } from "@/lib/jobs";
 
 const keys = {
   list: (workflowId?: string) => ["jobs", { workflowId: workflowId ?? null }] as const,
@@ -43,6 +43,14 @@ export function useRetryJob(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => retryJob(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+}
+
+export function useDeleteJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteJob(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
 }

@@ -5,13 +5,14 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nbplatform.core.errors import ConflictError, DomainValidationError, NotFoundError
 from nbplatform.domain.dag import validate_dag
 from nbplatform.domain.enums import TaskType, WorkflowStatus
+from nbplatform.models.job import Job
 from nbplatform.models.notebook import Notebook
 from nbplatform.models.workflow import Workflow, WorkflowDependency, WorkflowTask
 from nbplatform.repositories.workflow_repository import WorkflowRepository
@@ -62,6 +63,14 @@ class WorkflowService:
         workflow = await self.repo.get(workflow_id)
         if workflow is None:
             raise NotFoundError(f"Workflow {workflow_id} não encontrado.")
+        job_count = await self.session.scalar(
+            select(func.count()).select_from(Job).where(Job.workflow_id == workflow_id)
+        )
+        if job_count:
+            raise ConflictError(
+                f"Workflow tem {job_count} execução(ões) no histórico. "
+                "Exclua as execuções antes de excluir o workflow."
+            )
         await self.repo.delete(workflow)
 
     # ── Grafo ──────────────────────────────────────────────────────────────

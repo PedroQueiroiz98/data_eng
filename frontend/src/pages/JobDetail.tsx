@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { LogTerminal } from "@/components/LogTerminal";
 import { JobSummary } from "@/components/jobs/JobSummary";
 import { NotificationsPanel } from "@/components/jobs/NotificationsPanel";
@@ -7,7 +7,7 @@ import { PipelineGraph } from "@/components/jobs/PipelineGraph";
 import { RunHistory } from "@/components/jobs/RunHistory";
 import { TaskDetailPanel } from "@/components/jobs/TaskDetailPanel";
 import { TaskTimeline } from "@/components/jobs/TaskTimeline";
-import { useCancelJob, useJob, useJobs, useRetryJob } from "@/hooks/useJobs";
+import { useCancelJob, useDeleteJob, useJob, useJobs, useRetryJob } from "@/hooks/useJobs";
 import {
   elapsedSince,
   fmtElapsed,
@@ -19,16 +19,18 @@ import {
 } from "@/lib/jobs";
 import { openJobSocket } from "@/lib/ws";
 import { Button, Card, PageHeader, StatusChip, Tabs, useConfirm, useToast } from "@/ui";
-import { RetryIcon, StopIcon } from "@/ui/icons";
+import { DeleteIcon, RetryIcon, StopIcon } from "@/ui/icons";
 
 const RETRYABLE_TASK = new Set(["FAILED", "CANCELLED", "SKIPPED"]);
 
 export function JobDetail() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
   const cancel = useCancelJob(id);
   const retry = useRetryJob(id);
+  const remove = useDeleteJob();
 
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [wsJob, setWsJob] = useState<Record<string, unknown> | null>(null);
@@ -170,6 +172,25 @@ export function JobDetail() {
     }
   };
 
+  const onDelete = async () => {
+    if (
+      await confirm({
+        title: "Excluir execução",
+        message: "Excluir esta execução e seu histórico (tarefas, logs, notificações)?",
+        confirmLabel: "Excluir",
+        danger: true,
+      })
+    ) {
+      remove.mutate(id, {
+        onSuccess: () => {
+          toast.success("Execução excluída");
+          navigate("/jobs");
+        },
+        onError: (e) => toast.error((e as Error).message),
+      });
+    }
+  };
+
   const tabs = [
     { id: "logs", label: "Logs" },
     { id: "params", label: "Parâmetros", badge: Object.keys(parameters).length || undefined },
@@ -219,6 +240,17 @@ export function JobDetail() {
                 onClick={onRetry}
               >
                 Refazer falhas
+              </Button>
+            )}
+            {effective && isJobTerminal(effective) && (
+              <Button
+                variant="outlined"
+                size="sm"
+                icon={<DeleteIcon className="h-4 w-4" />}
+                loading={remove.isPending}
+                onClick={onDelete}
+              >
+                Excluir
               </Button>
             )}
           </>

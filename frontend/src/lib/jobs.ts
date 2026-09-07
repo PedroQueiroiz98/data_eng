@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 
 export type JobStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
 export type JobTaskStatus =
@@ -183,3 +183,5 @@ export const cancelJob = (id: string): Promise<Job> =>
 
 export const retryJob = (id: string): Promise<Job> =>
   apiPost<Job>(`/jobs/${id}/retry`);
+
+export const deleteJob = (id: string): Promise<void> => apiDelete(`/jobs/${id}`);

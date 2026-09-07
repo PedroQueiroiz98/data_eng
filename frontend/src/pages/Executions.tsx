@@ -1,16 +1,20 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { bulkFailureReport } from "@/components/bulkReport";
 import { useExecutions } from "@/hooks/useExecutions";
+import { bulkRun, bulkSuccessMessage } from "@/lib/bulk";
 import {
   cancelExecution,
   canCancel,
   canRetry,
+  deleteExecution,
   retryExecution,
   type Execution,
   type ExecutionStatus,
 } from "@/lib/executions";
 import {
+  Button,
   Column,
   DataTable,
   EmptyState,
@@ -18,10 +22,11 @@ import {
   PageHeader,
   SelectField,
   StatusChip,
+  useAlert,
   useConfirm,
   useToast,
 } from "@/ui";
-import { HistoryIcon, RetryIcon, StopIcon, ViewIcon } from "@/ui/icons";
+import { DeleteIcon, HistoryIcon, RetryIcon, StopIcon, ViewIcon } from "@/ui/icons";
 
 const STATUSES: ExecutionStatus[] = [
   "QUEUED",
@@ -43,11 +48,59 @@ export function Executions() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const alert = useAlert();
   const qc = useQueryClient();
   const [status, setStatus] = useState<ExecutionStatus | "">("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const { data, isLoading, isError } = useExecutions(status || undefined);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["executions"] });
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const doDelete = async (e: Execution) => {
+    const running = e.status === "RUNNING" || e.status === "QUEUED";
+    if (
+      await confirm({
+        title: "Excluir execução",
+        message: running
+          ? `A execução ${e.id.slice(0, 8)} será cancelada e depois excluída.`
+          : `Excluir a execução ${e.id.slice(0, 8)} e seus logs?`,
+        confirmLabel: running ? "Cancelar e excluir" : "Excluir",
+        danger: true,
+      })
+    ) {
+      setDeletingId(e.id);
+      try {
+        await deleteExecution(e.id);
+        toast.success("Execução excluída");
+        refresh();
+      } catch (err) {
+        toast.error((err as Error).message);
+      } finally {
+        setDeletingId(null);
+      }
+    }
+  };
+
+  const bulkDelete = async (ids: string[], clear: () => void) => {
+    if (
+      !(await confirm({
+        title: "Excluir execuções",
+        message: `Excluir ${ids.length} execução(ões) e seus logs? As que estiverem em andamento são canceladas antes; as que pertencem a um job são ignoradas.`,
+        confirmLabel: "Excluir",
+        danger: true,
+      }))
+    )
+      return;
+    setBulkBusy(true);
+    const res = await bulkRun(ids, deleteExecution);
+    setBulkBusy(false);
+    refresh();
+    clear();
+    if (res.ok > 0) toast.success(bulkSuccessMessage(res.ok, "execução"));
+    if (res.failed > 0) await alert(bulkFailureReport(res, ids.length, "execuções", (id) => id.slice(0, 8)));
+  };
 
   const doCancel = async (e: Execution) => {
     if (
@@ -155,6 +208,21 @@ export function Executions() {
               }}
             />
           )}
+          <IconButton
+            label={
+              e.status === "RUNNING" || e.status === "QUEUED"
+                ? "Cancelar e excluir"
+                : "Excluir"
+            }
+            size="sm"
+            danger
+            disabled={deletingId === e.id}
+            icon={<DeleteIcon className="h-4 w-4" />}
+            onClick={(ev) => {
+              ev.stopPropagation();
+              void doDelete(e);
+            }}
+          />
         </div>
       ),
     },
@@ -188,6 +256,18 @@ export function Executions() {
           rowKey={(e) => e.id}
           loading={isLoading}
           onRowClick={(e) => navigate(`/executions/${e.id}`)}
+          selectable
+          bulkActions={(ids, clear) => (
+            <Button
+              size="sm"
+              variant="danger"
+              loading={bulkBusy}
+              icon={<DeleteIcon className="h-4 w-4" />}
+              onClick={() => void bulkDelete(ids, clear)}
+            >
+              Excluir {ids.length}
+            </Button>
+          )}
           empty={
             <EmptyState
               icon={HistoryIcon}

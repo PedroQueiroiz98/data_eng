@@ -5,11 +5,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nbplatform.core.errors import NotFoundError
+from nbplatform.core.errors import ConflictError, NotFoundError
 from nbplatform.domain.notebook_format import new_empty_notebook, validate_notebook
 from nbplatform.models.notebook import Notebook, NotebookVersion
+from nbplatform.models.workflow import Workflow, WorkflowTask
 from nbplatform.repositories.notebook_repository import NotebookRepository
 
 
@@ -65,6 +67,20 @@ class NotebookService:
 
     async def delete(self, notebook_id: uuid.UUID) -> None:
         notebook = await self.get(notebook_id)
+        rows = await self.session.execute(
+            select(Workflow.name)
+            .join(WorkflowTask, WorkflowTask.workflow_id == Workflow.id)
+            .where(WorkflowTask.notebook_id == notebook_id)
+            .distinct()
+        )
+        names = sorted(name for (name,) in rows.all())
+        if names:
+            shown = ", ".join(f'"{n}"' for n in names[:5])
+            more = "" if len(names) <= 5 else f" e mais {len(names) - 5}"
+            raise ConflictError(
+                f"Notebook em uso pelo(s) workflow(s): {shown}{more}. "
+                "Remova a tarefa do workflow antes de excluir o notebook."
+            )
         await self.repo.delete(notebook)
 
     # ── Versionamento (imutável) ─────────────────────────────────────────────

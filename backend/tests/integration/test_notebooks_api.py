@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import requires_services
+from tests.integration.helpers import make_workflow
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
@@ -97,6 +98,20 @@ async def test_delete_then_get_is_404(client) -> None:
     nb = await _make_notebook(client)
     assert (await client.delete(f"/api/notebooks/{nb['id']}")).status_code == 204
     assert (await client.get(f"/api/notebooks/{nb['id']}")).status_code == 404
+
+
+async def test_delete_notebook_in_use_by_workflow_is_409(client) -> None:
+    nb = await _make_notebook(client, name="usado")
+    await make_workflow(
+        client, "wf-usa-nb", [{"key": "a", "name": "A", "notebook_id": nb["id"]}], []
+    )
+    resp = await client.delete(f"/api/notebooks/{nb['id']}")
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == "conflict"
+    assert "wf-usa-nb" in body["error"]["message"]
+    # continua existindo
+    assert (await client.get(f"/api/notebooks/{nb['id']}")).status_code == 200
 
 
 async def test_list_contains_created(client) -> None:

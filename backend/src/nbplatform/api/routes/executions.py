@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 from fastapi import APIRouter, Query, Response, status
 
 from nbplatform.api.deps import CurrentUserId, RedisDep, SessionDep
+from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError
 from nbplatform.domain.enums import ExecutionStatus
 from nbplatform.domain.state_machine import TERMINAL_EXECUTION_STATES
@@ -127,6 +129,32 @@ async def list_executions(
 @router.get("/api/executions/{execution_id}", response_model=ExecutionDetail)
 async def get_execution(execution_id: uuid.UUID, session: SessionDep) -> ExecutionDetail:
     return _detail(await ExecutionService(session).get(execution_id))
+
+
+@router.delete(
+    "/api/executions/{execution_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_execution(
+    execution_id: uuid.UUID, session: SessionDep, redis: RedisDep, user_id: CurrentUserId
+) -> None:
+    settings = get_settings()
+    service = ExecutionService(session)
+    # QUEUED/RUNNING: cancela e espera encerrar antes de excluir
+    await service.cancel_for_delete(
+        execution_id, redis, wait_s=settings.execution_delete_cancel_wait_s
+    )
+    await service.delete(execution_id)
+    with contextlib.suppress(Exception):
+        await redis.delete(
+            settings.cancel_key(str(execution_id)),
+            settings.exec_seq_key(str(execution_id)),
+        )
+    await AuditService(session).record(
+        user_id=user_id,
+        action="DELETE_EXECUTION",
+        resource_type="execution",
+        resource_id=str(execution_id),
+    )
 
 
 @router.get("/api/executions/{execution_id}/logs", response_model=list[ExecutionLogRead])

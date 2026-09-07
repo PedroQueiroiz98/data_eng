@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 from fastapi import APIRouter, Query, status
@@ -75,6 +76,21 @@ async def list_jobs(
 @router.get("/api/jobs/{job_id}", response_model=JobDetail)
 async def get_job(job_id: uuid.UUID, session: SessionDep) -> JobDetail:
     return await JobService(session).detail(job_id)
+
+
+@router.delete("/api/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: uuid.UUID, session: SessionDep, redis: RedisDep, user_id: CurrentUserId
+) -> None:
+    await JobService(session).delete(job_id)
+    settings = get_settings()
+    with contextlib.suppress(Exception):
+        await redis.delete(
+            settings.job_cancel_key(str(job_id)), settings.job_seq_key(str(job_id))
+        )
+    await AuditService(session).record(
+        user_id=user_id, action="DELETE_JOB", resource_type="job", resource_id=str(job_id)
+    )
 
 
 @router.get("/api/jobs/{job_id}/logs", response_model=list[JobLogRead])

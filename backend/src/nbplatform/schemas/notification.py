@@ -64,6 +64,11 @@ class NotificationSettingsRead(BaseModel):
     bitrix_bot_id: str | None = None
     bitrix_bot_token_masked: str = ""  # "********" se definido
 
+    # fallback: notifica falha de pipelines sem config própria
+    default_on_failure: bool = False
+    default_email_recipients: list[str] = Field(default_factory=list)
+    default_bitrix_dialog_id: str | None = None
+
 
 class NotificationSettingsUpdate(BaseModel):
     email_enabled: bool = False
@@ -80,6 +85,10 @@ class NotificationSettingsUpdate(BaseModel):
     bitrix_send_message_path: str | None = None
     bitrix_bot_id: str | None = None
     bitrix_bot_token: str | None = None
+
+    default_on_failure: bool = False
+    default_email_recipients: list[str] = Field(default_factory=list)
+    default_bitrix_dialog_id: str | None = None
 
 
 # ─── histórico ──────────────────────────────────────────────────────────────

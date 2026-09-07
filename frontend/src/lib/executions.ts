@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import type { NotebookContent } from "@/lib/notebooks";
 
 export type ExecutionStatus =
@@ -73,6 +73,12 @@ export const cancelExecution = (id: string): Promise<Execution> =>
 
 export const retryExecution = (id: string): Promise<Execution> =>
   apiPost<Execution>(`/executions/${id}/retry`);
+
+export const deleteExecution = (id: string): Promise<void> =>
+  apiDelete(`/executions/${id}`);
+
+export const canDelete = (s: ExecutionStatus): boolean =>
+  s === "SUCCESS" || s === "FAILED" || s === "CANCELLED" || s === "TIMEOUT";
 
 export const canCancel = (s: ExecutionStatus): boolean =>
   s === "QUEUED" || s === "RUNNING";

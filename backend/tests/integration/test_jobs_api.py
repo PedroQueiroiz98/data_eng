@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import requires_services
-from tests.integration.helpers import make_notebook, make_workflow, notebook_content
+from tests.integration.helpers import (
+    drive_job,
+    make_notebook,
+    make_workflow,
+    notebook_content,
+)
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
@@ -84,3 +89,22 @@ async def test_retry_requires_terminal_failed_job(client) -> None:
     job = (await client.post(f"/api/workflows/{wf}/run", json={})).json()
     resp = await client.post(f"/api/jobs/{job['id']}/retry")
     assert resp.status_code == 409  # ainda RUNNING
+
+
+async def test_delete_job_requires_terminal_then_removes_it(client) -> None:
+    wf = await _workflow(client)
+    job = (await client.post(f"/api/workflows/{wf}/run", json={})).json()
+
+    # RUNNING não pode ser excluído
+    running = await client.delete(f"/api/jobs/{job['id']}")
+    assert running.status_code == 409
+
+    status = await drive_job(job["id"])
+    assert status == "SUCCESS"
+
+    resp = await client.delete(f"/api/jobs/{job['id']}")
+    assert resp.status_code == 204
+    assert (await client.get(f"/api/jobs/{job['id']}")).status_code == 404
+    # sumiu da listagem também
+    listing = (await client.get(f"/api/jobs?workflow_id={wf}")).json()
+    assert all(j["id"] != job["id"] for j in listing)

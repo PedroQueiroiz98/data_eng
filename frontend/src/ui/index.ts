@@ -12,4 +12,4 @@ export { ActionMenu, type MenuItem } from "@/ui/Menu";
 export { Dialog } from "@/ui/Dialog";
 export { TextField, SelectField, TextArea, Switch } from "@/ui/Field";
 export { ToastProvider, useToast } from "@/ui/Toast";
-export { ConfirmProvider, useConfirm } from "@/ui/ConfirmDialog";
+export { ConfirmProvider, useConfirm, useAlert } from "@/ui/ConfirmDialog";
