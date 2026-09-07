@@ -64,6 +64,23 @@ class NotificationQueue:
             self.settings.redis_queue_notifications_processing, 1, message.raw
         )
 
+    async def reclaim_processing(self) -> int:
+        """Devolve à fila principal ids presos em <processing>.
+
+        Um worker que morre entre `lease` e `ack` deixa o id parado na lista de
+        processing e ninguém o reivindica. Chamado pelo loop de recovery.
+        """
+        key = self.settings.redis_queue_notifications_processing
+        stuck = cast("list[str]", await self.redis.lrange(key, 0, -1))
+        reclaimed = 0
+        for raw in stuck:
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            if await self.redis.lrem(key, 1, raw):
+                await self.redis.lpush(self.settings.redis_queue_notifications, raw)
+                reclaimed += 1
+        return reclaimed
+
     async def queued_count(self) -> int:
         return int(await self.redis.llen(self.settings.redis_queue_notifications))
 

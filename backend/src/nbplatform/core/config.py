@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     notification_retry_backoff_multiplier: float = 3.0
     notification_retry_max_delay_s: float = 300.0
     notification_send_timeout_s: float = 20.0
+    # janela após a qual uma notificação presa em SENDING é considerada abandonada
+    # (worker morreu no meio do envio) e volta para a fila pelo recovery.
+    notification_stale_after_s: float = 120.0
     # Fallbacks de infraestrutura (usados quando o NotificationSettings do banco
     # não preenche o campo). Secrets NUNCA voltam para o frontend.
     notify_smtp_host: str = ""

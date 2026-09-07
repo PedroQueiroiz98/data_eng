@@ -22,7 +22,10 @@ from nbplatform.queue.redis_client import close_redis, get_redis, ping
 from nbplatform.worker.execution_manager import ExecutionManager, cleanup_workdir
 from nbplatform.worker.job_loop import run_job_cycle
 from nbplatform.worker.notification_loop import run_notification_loop
-from nbplatform.worker.recovery import recover_stale_executions
+from nbplatform.worker.recovery import (
+    recover_stale_executions,
+    recover_stale_notifications,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,10 @@ async def _recovery_loop(stop: asyncio.Event) -> None:
             await recover_stale_executions(redis)
         except Exception:
             logger.exception("erro no loop de recovery")
+        try:
+            await recover_stale_notifications(redis)
+        except Exception:
+            logger.exception("erro no recovery de notificações")
 
 
 async def _job_loop(stop: asyncio.Event) -> None:

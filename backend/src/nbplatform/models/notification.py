@@ -120,6 +120,9 @@ class Notification(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # marcado ao entrar em SENDING; usado pelo recovery para detectar envios
+    # abandonados (worker morreu no meio). Limpo em qualquer estado terminal.
+    sending_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # cópia enxuta da mensagem para reenvio manual sem recalcular contexto
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     seq: Mapped[int | None] = mapped_column(BigInteger)

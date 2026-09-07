@@ -158,6 +158,7 @@ class NotificationService:
                 await repo.get_settings_row(), self.settings, self._cipher
             )
             row.status = NotificationStatus.SENDING
+            row.sending_since = datetime.now(UTC)
             row.attempt += 1
             await session.flush()
 
@@ -182,6 +183,7 @@ class NotificationService:
             if result.ok:
                 row.status = NotificationStatus.SENT
                 row.sent_at = datetime.now(UTC)
+                row.sending_since = None
                 row.error_message = None
                 logger.info(
                     "Notification sent",
@@ -201,6 +203,7 @@ class NotificationService:
                     self.settings.notification_retry_max_delay_s,
                 )
                 row.status = NotificationStatus.PENDING
+                row.sending_since = None
                 row.next_retry_at = datetime.fromtimestamp(time.time() + delay, tz=UTC)
                 logger.warning(
                     "Notification failed",
@@ -218,6 +221,7 @@ class NotificationService:
                 return NotificationStatus.PENDING
 
             row.status = NotificationStatus.FAILED
+            row.sending_since = None
             logger.error(
                 "Notification failed (giving up)",
                 extra={
@@ -237,6 +241,7 @@ class NotificationService:
                 return
             row.status = NotificationStatus.PENDING
             row.next_retry_at = None
+            row.sending_since = None
             if row.attempt >= row.max_attempts:
                 row.max_attempts = row.attempt + 1
         await self.queue.enqueue(str(notification_id))
