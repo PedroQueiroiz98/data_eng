@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
+import { Navigate, useNavigate } from "react-router-dom";
+import { useAuthContext } from "@/components/AuthProvider";
 
 export function Login() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, user, loading } = useAuthContext();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -16,13 +16,17 @@ export function Login() {
     setBusy(true);
     try {
       await login(email.trim(), password);
-      navigate("/dashboard");
+      navigate("/dashboard", { replace: true });
     } catch {
       setError("Credenciais inválidas.");
     } finally {
       setBusy(false);
     }
   };
+
+  if (!loading && user) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50">

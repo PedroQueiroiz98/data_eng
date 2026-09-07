@@ -46,7 +46,9 @@ describe("Login", () => {
     await userEvent.type(screen.getByLabelText(/Senha/), "secret");
     await userEvent.click(screen.getByRole("button", { name: /Entrar/ }));
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/dashboard"));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith("/dashboard", { replace: true }),
+    );
     expect(localStorage.getItem("nbp.token")).toBe("tok-123");
   });
 
