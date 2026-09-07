@@ -14,10 +14,13 @@ from nbplatform.models.notification import (
 from nbplatform.models.schedule import Schedule
 from nbplatform.models.user import User
 from nbplatform.models.workflow import Workflow, WorkflowDependency, WorkflowTask
+from nbplatform.models.workspace import Workspace, WorkspaceGitRepository
 
 __all__ = [
     "Base",
     "AuditLog",
+    "Workspace",
+    "WorkspaceGitRepository",
     "Secret",
     "Variable",
     "Execution",

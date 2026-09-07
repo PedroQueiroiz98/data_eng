@@ -202,6 +202,12 @@ class ExecutionManager:
                 exec_uuid, worker_id=self.worker_id, attempt=attempt
             )
             timeout_s = execution.timeout_s
+            # Fase 1/2: execuções de Workspace preenchem source=WORKSPACE e
+            # notebook_path; até a Fase 2 apenas a origem DB chega aqui.
+            assert execution.notebook_version_id is not None, (
+                "execução sem notebook_version_id (origem WORKSPACE ainda não suportada "
+                "pelo executor)"
+            )
             version = await service.notebooks.get_version_by_id(
                 execution.notebook_version_id
             )

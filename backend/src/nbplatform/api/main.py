@@ -25,6 +25,7 @@ from nbplatform.api.routes import (
     secrets,
     variables,
     workflows,
+    workspaces,
     ws,
 )
 from nbplatform.core.config import get_settings
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
         audit,
         lsp,
         notifications,
+        workspaces,
     ):
         app.include_router(module.router, dependencies=protected)
 

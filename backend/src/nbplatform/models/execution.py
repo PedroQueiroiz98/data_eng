@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nbplatform.db.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
-from nbplatform.domain.enums import ExecutionStatus, LogLevel
+from nbplatform.domain.enums import ExecutionSource, ExecutionStatus, LogLevel
 
 
 class Execution(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -26,11 +26,27 @@ class Execution(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __table_args__ = (
         Index("ix_executions_status_created", "status", "created_at"),
         Index("ix_executions_heartbeat", "status", "last_heartbeat"),
+        Index("ix_executions_workspace", "workspace_id", "created_at"),
     )
 
-    notebook_version_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("notebook_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+    # Discriminador de origem do notebook. DB (legado) usa notebook_version_id;
+    # WORKSPACE usa workspace_id + notebook_path. Invariante garantida no serviço.
+    source: Mapped[ExecutionSource] = mapped_column(
+        Enum(ExecutionSource, native_enum=False, length=20),
+        default=ExecutionSource.DB,
+        server_default=ExecutionSource.DB.value,
+        nullable=False,
     )
+    notebook_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("notebook_versions.id", ondelete="RESTRICT"), index=True
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    # Caminho do notebook relativo à raiz do Workspace (POSIX).
+    notebook_path: Mapped[str | None] = mapped_column(String(1024))
+    # SHA do commit no momento da execução (preenchido quando há repositório Git).
+    source_commit: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[ExecutionStatus] = mapped_column(
         Enum(ExecutionStatus, native_enum=False, length=20),
         default=ExecutionStatus.QUEUED,

@@ -28,6 +28,7 @@ x-backend-env: &backend-env
   EXECUTION_RETRY_BACKOFF_MULTIPLIER: ${NBP_EXECUTION_RETRY_BACKOFF_MULTIPLIER:-2}
   EXECUTION_RETRY_MAX_DELAY_S: ${NBP_EXECUTION_RETRY_MAX_DELAY_S:-300}
   EXECUTION_RETRY_MODE: ${NBP_EXECUTION_RETRY_MODE:-TRANSIENT_ONLY}
+  WORKSPACES_DIR: ${NBP_WORKSPACES_DIR:-/data/workspaces}
 
 services:
   postgres:
@@ -65,6 +66,7 @@ services:
       <<: *backend-env
     volumes:
       - execution_artifacts:/data/executions
+      - workspaces:/data/workspaces
     ports:
       - "${NBP_BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -87,6 +89,7 @@ services:
       <<: *backend-env
     volumes:
       - execution_artifacts:/data/executions
+      - workspaces:/data/workspaces
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,3 +129,4 @@ services:
 volumes:
   pgdata:
   execution_artifacts:
+  workspaces:

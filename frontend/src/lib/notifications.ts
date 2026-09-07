@@ -40,6 +40,9 @@ export interface NotificationSettings {
   bitrix_send_message_path: string | null;
   bitrix_bot_id: string | null;
   bitrix_bot_token_masked: string;
+  default_on_failure: boolean;
+  default_email_recipients: string[];
+  default_bitrix_dialog_id: string | null;
 }
 
 export interface NotificationSettingsInput {
@@ -55,6 +58,9 @@ export interface NotificationSettingsInput {
   bitrix_send_message_path: string | null;
   bitrix_bot_id: string | null;
   bitrix_bot_token: string | null;
+  default_on_failure: boolean;
+  default_email_recipients: string[];
+  default_bitrix_dialog_id: string | null;
 }
 
 export interface NotificationRecord {

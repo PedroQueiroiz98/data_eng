@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     # Diretório de artefatos de execução (volume compartilhado worker/api).
     executions_dir: str = "/data/executions"
 
+    # ─── Workspace ───
+    # Raiz física de todos os Workspaces (volume compartilhado backend/worker).
+    # Em dev local aponte NBP_WORKSPACES_DIR para uma pasta real.
+    workspaces_dir: str = "/data/workspaces"
+    workspace_max_upload_bytes: int = 104_857_600  # 100 MiB
+    workspace_tree_max_nodes: int = 5_000
+    workspace_tree_max_depth: int = 12
+
     # Prefixos de chaves Redis (mantidos aqui para não espalhar strings mágicas).
     redis_heartbeat_prefix: str = "nbp:heartbeat:"
     redis_queue_executions: str = "nbp:queue:executions"

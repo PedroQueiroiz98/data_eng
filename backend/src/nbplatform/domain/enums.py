@@ -69,3 +69,21 @@ class ErrorClass(StrEnum):
 class RetryMode(StrEnum):
     ANY = "ANY"
     TRANSIENT_ONLY = "TRANSIENT_ONLY"
+
+
+class ExecutionSource(StrEnum):
+    """De onde vem o notebook de uma Execution.
+
+    DB        → `executions.notebook_version_id` (fluxo legado, notebook no Postgres).
+    WORKSPACE → `executions.workspace_id` + `executions.notebook_path` (arquivo em disco).
+    """
+
+    DB = "DB"
+    WORKSPACE = "WORKSPACE"
+
+
+class GitProvider(StrEnum):
+    GITHUB = "GITHUB"
+    GITLAB = "GITLAB"
+    BITBUCKET = "BITBUCKET"
+    AZURE_DEVOPS = "AZURE_DEVOPS"

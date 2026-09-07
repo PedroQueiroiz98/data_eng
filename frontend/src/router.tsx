@@ -10,6 +10,9 @@ import { Login } from "@/pages/Login";
 import { NotebookEditor } from "@/pages/NotebookEditor";
 import { Notebooks } from "@/pages/Notebooks";
 import { Schedules } from "@/pages/Schedules";
+import { Workspace } from "@/pages/Workspace";
+import { Workspaces } from "@/pages/Workspaces";
+import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { Secrets } from "@/pages/Secrets";
 import { Settings } from "@/pages/Settings";
 import { Variables } from "@/pages/Variables";
@@ -30,6 +33,7 @@ export const router = createBrowserRouter(
             { path: "dashboard", element: <Dashboard /> },
             { path: "notebooks", element: <Notebooks /> },
             { path: "notebooks/:id", element: <NotebookEditor /> },
+            { path: "workspaces", element: <Workspaces /> },
             { path: "workflows", element: <Workflows /> },
             { path: "workflows/:id", element: <WorkflowEditor /> },
             { path: "jobs", element: <Jobs /> },
@@ -41,6 +45,11 @@ export const router = createBrowserRouter(
             { path: "secrets", element: <Secrets /> },
             { path: "settings", element: <Settings /> },
           ],
+        },
+        {
+          path: "/",
+          element: <WorkspaceLayout />,
+          children: [{ path: "workspaces/:id", element: <Workspace /> }],
         },
       ],
     },

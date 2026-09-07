@@ -19,7 +19,16 @@ const EMPTY: NotificationSettingsInput = {
   bitrix_send_message_path: "",
   bitrix_bot_id: "",
   bitrix_bot_token: "",
+  default_on_failure: false,
+  default_email_recipients: [],
+  default_bitrix_dialog_id: "",
 };
+
+const linesToList = (s: string): string[] =>
+  s
+    .split(/[\n,;]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 /** Configuração global dos providers. Secrets nunca voltam do backend. */
 export function NotificationSettingsCard() {
@@ -27,6 +36,7 @@ export function NotificationSettingsCard() {
   const { data } = useNotificationSettings();
   const save = useSaveNotificationSettings();
   const [form, setForm] = useState<NotificationSettingsInput>(EMPTY);
+  const [defaultRecipients, setDefaultRecipients] = useState("");
 
   useEffect(() => {
     if (!data) return;
@@ -43,7 +53,11 @@ export function NotificationSettingsCard() {
       bitrix_send_message_path: data.bitrix_send_message_path ?? "",
       bitrix_bot_id: data.bitrix_bot_id ?? "",
       bitrix_bot_token: data.bitrix_bot_token_masked,
+      default_on_failure: data.default_on_failure,
+      default_email_recipients: data.default_email_recipients,
+      default_bitrix_dialog_id: data.default_bitrix_dialog_id ?? "",
     });
+    setDefaultRecipients(data.default_email_recipients.join("\n"));
   }, [data]);
 
   const patch = (p: Partial<NotificationSettingsInput>) => setForm((f) => ({ ...f, ...p }));
@@ -57,6 +71,8 @@ export function NotificationSettingsCard() {
       bitrix_url: form.bitrix_url || null,
       bitrix_send_message_path: form.bitrix_send_message_path || null,
       bitrix_bot_id: form.bitrix_bot_id || null,
+      default_email_recipients: linesToList(defaultRecipients),
+      default_bitrix_dialog_id: form.default_bitrix_dialog_id || null,
     });
     toast.success("Configuração de notificações salva");
   };
@@ -154,10 +170,45 @@ export function NotificationSettingsCard() {
           />
         </section>
       </div>
+
+      <div className="mt-5 rounded-lg border border-surface-border p-3">
+        <Switch
+          checked={form.default_on_failure}
+          onChange={(v) => patch({ default_on_failure: v })}
+          label="Notificar falha de qualquer pipeline (sem configuração própria)"
+        />
+        {form.default_on_failure && (
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-fg-muted">
+                Destinatários de e-mail padrão (um por linha)
+              </span>
+              <textarea
+                rows={3}
+                value={defaultRecipients}
+                onChange={(e) => setDefaultRecipients(e.target.value)}
+                placeholder={"oncall@empresa.com\ndevops@empresa.com"}
+                className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 font-mono text-xs
+                  focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </label>
+            <TextField
+              label="Dialog ID Bitrix padrão"
+              mono
+              value={form.default_bitrix_dialog_id ?? ""}
+              placeholder="chat3129"
+              onChange={(e) => patch({ default_bitrix_dialog_id: e.target.value })}
+              hint="Usado quando o pipeline não define destino próprio."
+            />
+          </div>
+        )}
+      </div>
+
       <p className="mt-3 text-xs text-fg-faint">
         Também é possível definir tudo por variáveis de ambiente
         (<span className="font-mono">NOTIFY_SMTP_*</span>,{" "}
-        <span className="font-mono">NOTIFY_BITRIX_*</span>) — o banco tem prioridade.
+        <span className="font-mono">NOTIFY_BITRIX_*</span>,{" "}
+        <span className="font-mono">NOTIFY_DEFAULT_*</span>) — o banco tem prioridade.
       </p>
     </Card>
   );

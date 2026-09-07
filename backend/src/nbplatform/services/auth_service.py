@@ -6,20 +6,19 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nbplatform.core.errors import DomainError
+from nbplatform.core.errors import DomainError, ForbiddenError
 from nbplatform.core.security import create_access_token, hash_password, verify_password
 from nbplatform.models.user import User
 from nbplatform.repositories.user_repository import UserRepository
+
+# ForbiddenError vive em core.errors; re-exportado aqui por compatibilidade
+# (api/deps.py e outros importam de nbplatform.services.auth_service).
+__all__ = ["AuthError", "ForbiddenError", "AuthService"]
 
 
 class AuthError(DomainError):
     status_code = 401
     code = "unauthorized"
-
-
-class ForbiddenError(DomainError):
-    status_code = 403
-    code = "forbidden"
 
 
 class AuthService:
