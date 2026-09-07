@@ -65,22 +65,32 @@ async def put_config(
 
 
 async def get_settings_read(session: AsyncSession) -> NotificationSettingsRead:
+    """Config efetiva para exibir: linha do banco + fallback de env (sem secrets)."""
     row = await NotificationRepository(session).get_settings_row()
-    if row is None:
-        return NotificationSettingsRead()
+    s = get_settings()
+
+    def pick(db_val: object, env_val: object) -> object:
+        return db_val if db_val not in (None, "") else (env_val or None)
+
     return NotificationSettingsRead(
-        email_enabled=row.email_enabled,
-        smtp_host=row.smtp_host,
-        smtp_port=row.smtp_port,
-        smtp_username=row.smtp_username,
-        smtp_from=row.smtp_from,
-        smtp_use_tls=row.smtp_use_tls,
-        smtp_password_masked=MASK if row.smtp_password_ct else "",
-        bitrix_enabled=row.bitrix_enabled,
-        bitrix_url=row.bitrix_url,
-        bitrix_send_message_path=row.bitrix_send_message_path,
-        bitrix_bot_id=row.bitrix_bot_id,
-        bitrix_bot_token_masked=MASK if row.bitrix_bot_token_ct else "",
+        email_enabled=(row.email_enabled if row else False) or bool(s.notify_smtp_host),
+        smtp_host=pick(row.smtp_host if row else None, s.notify_smtp_host),
+        smtp_port=pick(row.smtp_port if row else None, s.notify_smtp_port),
+        smtp_username=pick(row.smtp_username if row else None, s.notify_smtp_username),
+        smtp_from=pick(row.smtp_from if row else None, s.notify_smtp_from),
+        smtp_use_tls=(row.smtp_use_tls if row else s.notify_smtp_use_tls),
+        smtp_password_masked=MASK
+        if (row and row.smtp_password_ct) or s.notify_smtp_password
+        else "",
+        bitrix_enabled=(row.bitrix_enabled if row else False) or bool(s.notify_bitrix_url),
+        bitrix_url=pick(row.bitrix_url if row else None, s.notify_bitrix_url),
+        bitrix_send_message_path=pick(
+            row.bitrix_send_message_path if row else None, s.notify_bitrix_send_message_path
+        ),
+        bitrix_bot_id=pick(row.bitrix_bot_id if row else None, s.notify_bitrix_bot_id),
+        bitrix_bot_token_masked=MASK
+        if (row and row.bitrix_bot_token_ct) or s.notify_bitrix_bot_token
+        else "",
     )
 
 

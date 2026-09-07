@@ -123,22 +123,26 @@ export function NotificationSettingsCard() {
             label="Bitrix"
           />
           <TextField
-            label="URL"
+            label="URL (base do portal)"
             value={form.bitrix_url ?? ""}
             placeholder="https://portal.bitrix24.com"
             onChange={(e) => patch({ bitrix_url: e.target.value })}
+            hint="Só o host, sem /rest."
           />
           <TextField
-            label="Send message path"
+            label="Send message path (recurso completo)"
             mono
             value={form.bitrix_send_message_path ?? ""}
-            placeholder="/rest/imbot.message.add"
+            placeholder="/rest/1/xxxxxxxx/imbot.v2.Chat.Message.send"
             onChange={(e) => patch({ bitrix_send_message_path: e.target.value })}
+            hint="Inclua o segmento do webhook. Com Bot ID+Token: imbot.v2.Chat.Message.send; sem: im.message.add."
           />
           <TextField
             label="Bot ID"
             value={form.bitrix_bot_id ?? ""}
+            placeholder="93 (InvitaBot)"
             onChange={(e) => patch({ bitrix_bot_id: e.target.value })}
+            hint="Padrão 93. NÃO é o chat/dialog — este vai por pipeline (ex.: chat3129)."
           />
           <TextField
             label="Bot Token"
@@ -146,7 +150,7 @@ export function NotificationSettingsCard() {
             value={form.bitrix_bot_token ?? ""}
             placeholder={data?.bitrix_bot_token_masked ? SECRET_MASK : ""}
             onChange={(e) => patch({ bitrix_bot_token: e.target.value })}
-            hint="Nunca é exibido; deixe ******** para manter."
+            hint="Ou via env BITRIX_BOT_TOKEN. Nunca é exibido; deixe ******** para manter. Vazio = webhook de chat."
           />
         </section>
       </div>

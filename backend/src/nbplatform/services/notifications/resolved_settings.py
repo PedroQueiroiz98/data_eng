@@ -37,8 +37,15 @@ class BitrixProviderSettings:
     bot_token: str
 
     @property
+    def bot_mode(self) -> bool:
+        """True = fluxo de bot (imbot.message.add + botId/botToken).
+        False = webhook de chat (im.message.add; auth no próprio path)."""
+        return bool(self.bot_id and self.bot_token)
+
+    @property
     def usable(self) -> bool:
-        return self.enabled and bool(self.url and self.bot_id and self.bot_token)
+        # `dialog_id` vem da config por pipeline (checado no provider).
+        return self.enabled and bool(self.url)
 
 
 @dataclass(frozen=True)

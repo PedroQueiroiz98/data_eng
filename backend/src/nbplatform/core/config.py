@@ -5,11 +5,17 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_env: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
@@ -47,7 +53,7 @@ class Settings(BaseSettings):
     # Interpretador cujo site-packages o Jedi enxerga (default: o próprio, que
     # roda a mesma imagem do worker/kernel). "" => usa sys.executable.
     lsp_environment_path: str = ""
-    lsp_timeout_s: float = 6.0
+    lsp_timeout_s: float = 10.0
     lsp_max_source_chars: int = 200_000
     lsp_max_completions: int = 100
 
@@ -67,10 +73,16 @@ class Settings(BaseSettings):
     notify_smtp_password: str = ""
     notify_smtp_from: str = ""
     notify_smtp_use_tls: bool = True
-    notify_bitrix_url: str = ""
-    notify_bitrix_send_message_path: str = "/rest/imbot.message.add"
-    notify_bitrix_bot_id: str = ""
-    notify_bitrix_bot_token: str = ""
+    # Bot padrão = InvitaBot (BitrixBotConfig). Método v2 do messenger.
+    notify_bitrix_url: str = Field(
+        default="", validation_alias=AliasChoices("NOTIFY_BITRIX_URL", "BITRIX_URL")
+    )
+    notify_bitrix_send_message_path: str = "/rest/imbot.v2.Chat.Message.send"
+    notify_bitrix_bot_id: str = "93"
+    notify_bitrix_bot_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("NOTIFY_BITRIX_BOT_TOKEN", "BITRIX_BOT_TOKEN"),
+    )
 
     redis_queue_notifications: str = "nbp:queue:notifications"
     redis_queue_notifications_processing: str = "nbp:queue:notifications:processing"

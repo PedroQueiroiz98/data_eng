@@ -180,14 +180,15 @@ export function NotificationConfigDialog({ workflowId, workflowName, open, onClo
           {form.bitrix_enabled && (
             <div className="mt-3">
               <TextField
-                label="Dialog ID"
+                label="Dialog ID (destino)"
                 mono
                 value={form.bitrix_dialog_id ?? ""}
                 placeholder="chat3129"
                 onChange={(e) => patch({ bitrix_dialog_id: e.target.value })}
+                hint="chat<N> para um grupo, ou o ID numérico do usuário para conversa direta."
               />
               <p className="mt-1 text-xs text-fg-faint">
-                Bot e token do Bitrix ficam na configuração global (backend). Aqui só o destino.
+                URL, bot e token do Bitrix ficam na configuração global (backend). Aqui só o destino.
               </p>
             </div>
           )}
