@@ -27,21 +27,21 @@ export function StatCard({
   tone?: "default" | "success" | "danger" | "info";
 }) {
   const toneClass = {
-    default: "text-slate-800",
-    success: "text-green-600",
-    danger: "text-red-600",
+    default: "text-fg",
+    success: "text-ok",
+    danger: "text-danger",
     info: "text-primary",
   }[tone];
   return (
     <Card className="flex items-start justify-between">
       <div>
-        <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
+        <div className="text-xs font-medium uppercase tracking-wide text-fg-faint">
           {label}
         </div>
         <div className={`mt-1 text-3xl font-semibold tabular-nums ${toneClass}`}>{value}</div>
-        {hint && <div className="mt-0.5 text-xs text-slate-400">{hint}</div>}
+        {hint && <div className="mt-0.5 text-xs text-fg-faint">{hint}</div>}
       </div>
-      {icon && <div className="text-slate-300">{icon}</div>}
+      {icon && <div className="text-fg-faint">{icon}</div>}
     </Card>
   );
 }

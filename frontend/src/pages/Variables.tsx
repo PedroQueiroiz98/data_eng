@@ -77,19 +77,19 @@ export function Variables() {
       key: "key",
       header: "Chave",
       sortValue: (v) => v.key,
-      render: (v) => <span className="font-mono text-slate-800">{v.key}</span>,
+      render: (v) => <span className="font-mono text-fg">{v.key}</span>,
     },
     {
       key: "value",
       header: "Valor",
       sortValue: (v) => v.value,
-      render: (v) => <span className="text-slate-600">{v.value}</span>,
+      render: (v) => <span className="text-fg-muted">{v.value}</span>,
     },
     {
       key: "scope",
       header: "Escopo",
       sortValue: (v) => v.scope,
-      render: (v) => <span className="text-xs text-slate-400">{v.scope}</span>,
+      render: (v) => <span className="text-xs text-fg-faint">{v.scope}</span>,
     },
     {
       key: "actions",
@@ -120,7 +120,7 @@ export function Variables() {
       />
 
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar variáveis.</p>
+        <p className="text-sm text-danger">Falha ao carregar variáveis.</p>
       ) : (
         <DataTable
           columns={columns}

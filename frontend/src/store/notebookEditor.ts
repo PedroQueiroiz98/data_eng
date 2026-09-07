@@ -9,6 +9,8 @@ export interface EditorCell extends NotebookCell {
 interface EditorState {
   cells: EditorCell[];
   baseMetadata: Record<string, unknown>;
+  /** requisitos pip (um por linha) — persistidos em metadata.nbplatform.dependencies */
+  dependencies: string;
   nbformat: number;
   nbformatMinor: number;
   selectedId: string | null;
@@ -16,6 +18,7 @@ interface EditorState {
 
   load: (content: NotebookContent) => void;
   select: (localId: string | null) => void;
+  setDependencies: (text: string) => void;
   setSource: (localId: string, source: string) => void;
   setCellType: (localId: string, type: CellType) => void;
   addCell: (type: CellType, afterLocalId: string | null) => void;
@@ -49,9 +52,29 @@ const toEditorCell = (cell: NotebookCell): EditorCell => ({
 const indexOf = (cells: EditorCell[], localId: string): number =>
   cells.findIndex((c) => c.localId === localId);
 
+const NBP_META_KEY = "nbplatform";
+
+const readDependencies = (metadata: Record<string, unknown> | undefined): string => {
+  const section = metadata?.[NBP_META_KEY];
+  const raw =
+    section && typeof section === "object"
+      ? (section as Record<string, unknown>).dependencies
+      : undefined;
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string").join("\n");
+  return "";
+};
+
+const parseDependencies = (text: string): string[] =>
+  text
+    .split("\n")
+    .map((line) => line.split("#", 1)[0]!.trim())
+    .filter(Boolean);
+
 export const useNotebookEditor = create<EditorState>((set, get) => ({
   cells: [],
   baseMetadata: {},
+  dependencies: "",
   nbformat: 4,
   nbformatMinor: 5,
   selectedId: null,
@@ -61,6 +84,7 @@ export const useNotebookEditor = create<EditorState>((set, get) => ({
     set({
       cells: content.cells.map(toEditorCell),
       baseMetadata: content.metadata ?? {},
+      dependencies: readDependencies(content.metadata),
       nbformat: content.nbformat ?? 4,
       nbformatMinor: content.nbformat_minor ?? 5,
       selectedId: content.cells.length ? null : null,
@@ -68,6 +92,8 @@ export const useNotebookEditor = create<EditorState>((set, get) => ({
     }),
 
   select: (localId) => set({ selectedId: localId }),
+
+  setDependencies: (text) => set({ dependencies: text, dirty: true }),
 
   setSource: (localId, source) =>
     set((s) => ({
@@ -129,10 +155,26 @@ export const useNotebookEditor = create<EditorState>((set, get) => ({
 
   toContent: () => {
     const s = get();
+    const deps = parseDependencies(s.dependencies);
+    const prevSection =
+      s.baseMetadata[NBP_META_KEY] && typeof s.baseMetadata[NBP_META_KEY] === "object"
+        ? (s.baseMetadata[NBP_META_KEY] as Record<string, unknown>)
+        : undefined;
+    const metadata: Record<string, unknown> = { ...s.baseMetadata };
+    if (deps.length > 0) {
+      metadata[NBP_META_KEY] = { ...prevSection, dependencies: deps };
+    } else if (prevSection) {
+      const rest: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(prevSection)) {
+        if (k !== "dependencies") rest[k] = val;
+      }
+      if (Object.keys(rest).length > 0) metadata[NBP_META_KEY] = rest;
+      else delete metadata[NBP_META_KEY];
+    }
     return {
       nbformat: s.nbformat,
       nbformat_minor: s.nbformatMinor,
-      metadata: s.baseMetadata,
+      metadata,
       cells: s.cells.map((c) => {
         const base: Record<string, unknown> = {
           cell_type: c.cell_type,

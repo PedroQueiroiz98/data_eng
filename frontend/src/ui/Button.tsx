@@ -13,11 +13,12 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANTS: Record<Variant, string> = {
-  filled: "bg-primary text-primary-fg hover:bg-primary-hover shadow-e1 disabled:shadow-none",
-  tonal: "bg-primary-container text-primary-on-container hover:brightness-95",
-  outlined: "border border-surface-border bg-surface text-slate-700 hover:bg-surface-variant",
-  text: "text-primary hover:bg-primary-container/50",
-  danger: "bg-red-600 text-white hover:bg-red-700 shadow-e1",
+  filled:
+    "bg-primary text-primary-fg hover:brightness-95 active:brightness-90 shadow-e1 disabled:shadow-none",
+  tonal: "bg-primary-container text-primary-on-container hover:brightness-95 active:brightness-90",
+  outlined: "border border-surface-border bg-surface text-fg hover:bg-surface-variant",
+  text: "text-primary hover:bg-primary/10 active:bg-primary/15",
+  danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800 shadow-e1",
 };
 
 const SIZES: Record<Size, string> = {

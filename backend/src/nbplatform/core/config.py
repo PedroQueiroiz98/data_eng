@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     sandbox_memory: str = "512m"
     sandbox_pids_limit: int = 256
 
+    # ─── Instalação de pacotes por execução (pip) ───
+    # Habilita `%pip install` nas células e a lista de dependências do notebook
+    # (metadata.nbplatform.dependencies), instaladas num diretório isolado por
+    # execução e adicionadas ao PYTHONPATH. Nunca toca no site-packages do sistema.
+    execution_pip_install: bool = True
+    execution_pip_timeout_s: int = 300
+    execution_pip_index_url: str = ""
+    execution_pip_max_packages: int = 50
+
     max_concurrent_jobs: int = 5
     max_concurrent_executions: int = 5
 

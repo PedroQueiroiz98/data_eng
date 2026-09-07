@@ -20,26 +20,26 @@ interface Spec {
 
 const MAP: Record<string, Spec> = {
   // execuções / jobs / tasks
-  SUCCESS: { label: "Success", cls: "bg-green-100 text-green-700", Icon: SuccessIcon },
-  RUNNING: { label: "Running", cls: "bg-blue-100 text-blue-700", Icon: RunningIcon, spin: true },
-  FAILED: { label: "Failed", cls: "bg-red-100 text-red-700", Icon: FailIcon },
-  TIMEOUT: { label: "Timeout", cls: "bg-amber-100 text-amber-800", Icon: TimeoutIcon },
-  QUEUED: { label: "Queued", cls: "bg-slate-100 text-slate-600", Icon: QueuedIcon },
-  PENDING: { label: "Pending", cls: "bg-slate-100 text-slate-500", Icon: QueuedIcon },
-  CANCELLED: { label: "Cancelled", cls: "bg-slate-200 text-slate-600", Icon: CancelledIcon },
-  CANCELLING: { label: "Cancelling", cls: "bg-slate-200 text-slate-600", Icon: CancelledIcon },
-  SKIPPED: { label: "Skipped", cls: "bg-amber-50 text-amber-700", Icon: SkippedIcon },
+  SUCCESS: { label: "Success", cls: "bg-ok/15 text-ok", Icon: SuccessIcon },
+  RUNNING: { label: "Running", cls: "bg-info/15 text-info", Icon: RunningIcon, spin: true },
+  FAILED: { label: "Failed", cls: "bg-danger/15 text-danger", Icon: FailIcon },
+  TIMEOUT: { label: "Timeout", cls: "bg-warn/15 text-warn", Icon: TimeoutIcon },
+  QUEUED: { label: "Queued", cls: "bg-fg/10 text-fg-muted", Icon: QueuedIcon },
+  PENDING: { label: "Pending", cls: "bg-fg/10 text-fg-muted", Icon: QueuedIcon },
+  CANCELLED: { label: "Cancelled", cls: "bg-fg/10 text-fg-faint", Icon: CancelledIcon },
+  CANCELLING: { label: "Cancelling", cls: "bg-fg/10 text-fg-faint", Icon: CancelledIcon },
+  SKIPPED: { label: "Skipped", cls: "bg-warn/15 text-warn", Icon: SkippedIcon },
   // workflow
-  DRAFT: { label: "Draft", cls: "bg-slate-100 text-slate-600", Icon: QueuedIcon },
-  ACTIVE: { label: "Active", cls: "bg-green-100 text-green-700", Icon: SuccessIcon },
-  DISABLED: { label: "Disabled", cls: "bg-amber-100 text-amber-800", Icon: PauseIcon },
-  ARCHIVED: { label: "Archived", cls: "bg-slate-200 text-slate-500", Icon: CancelledIcon },
+  DRAFT: { label: "Draft", cls: "bg-fg/10 text-fg-muted", Icon: QueuedIcon },
+  ACTIVE: { label: "Active", cls: "bg-ok/15 text-ok", Icon: SuccessIcon },
+  DISABLED: { label: "Disabled", cls: "bg-warn/15 text-warn", Icon: PauseIcon },
+  ARCHIVED: { label: "Archived", cls: "bg-fg/10 text-fg-faint", Icon: CancelledIcon },
   // schedule
-  SCHEDULED: { label: "Scheduled", cls: "bg-indigo-100 text-indigo-700", Icon: TimeoutIcon },
-  ENABLED: { label: "Ativo", cls: "bg-green-100 text-green-700", Icon: CheckIcon },
+  SCHEDULED: { label: "Scheduled", cls: "bg-primary/15 text-primary", Icon: TimeoutIcon },
+  ENABLED: { label: "Ativo", cls: "bg-ok/15 text-ok", Icon: CheckIcon },
 };
 
-const FALLBACK: Spec = { label: "—", cls: "bg-slate-100 text-slate-600", Icon: QueuedIcon };
+const FALLBACK: Spec = { label: "—", cls: "bg-fg/10 text-fg-muted", Icon: QueuedIcon };
 
 export function StatusChip({
   status,

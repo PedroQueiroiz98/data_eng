@@ -97,7 +97,7 @@ export function JobDetail() {
         subtitle={
           <span className="flex items-center gap-3 text-xs">
             <span className="font-mono">{id.slice(0, 8)}</span>
-            <span className={connected ? "text-green-600" : "text-slate-400"}>
+            <span className={connected ? "text-ok" : "text-fg-faint"}>
               {connected ? "● ao vivo" : "○"}
             </span>
           </span>
@@ -130,17 +130,17 @@ export function JobDetail() {
       />
 
       <section className="mb-6">
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">Tarefas</h2>
+        <h2 className="mb-2 text-sm font-semibold text-fg">Tarefas</h2>
         <Card padded={false}>
           <ul className="divide-y divide-surface-border">
             {shownTasks.map((t) => (
               <li key={t.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <StatusChip status={t.status} size="sm" />
-                <span className="font-medium text-slate-700">{t.name}</span>
+                <span className="font-medium text-fg">{t.name}</span>
                 {t.error_message && (
-                  <span className="truncate text-xs text-red-600">{t.error_message}</span>
+                  <span className="truncate text-xs text-danger">{t.error_message}</span>
                 )}
-                <span className="ml-auto flex items-center gap-2 text-xs text-slate-400">
+                <span className="ml-auto flex items-center gap-2 text-xs text-fg-faint">
                   {t.attempt > 1 && <span>#{t.attempt}</span>}
                   {t.duration_ms != null && <span className="tabular-nums">{fmt(t.duration_ms)}</span>}
                   {t.execution_id && (
@@ -155,7 +155,7 @@ export function JobDetail() {
               </li>
             ))}
             {shownTasks.length === 0 && (
-              <li className="px-4 py-6 text-sm text-slate-400">Sem tarefas.</li>
+              <li className="px-4 py-6 text-sm text-fg-faint">Sem tarefas.</li>
             )}
           </ul>
         </Card>

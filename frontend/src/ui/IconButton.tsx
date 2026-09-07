@@ -21,10 +21,10 @@ export const IconButton = forwardRef<HTMLButtonElement, Props>(function IconButt
         ref={ref}
         type="button"
         aria-label={label}
-        className={`inline-flex ${dim} items-center justify-center rounded-full text-slate-500
-          transition hover:bg-surface-variant hover:text-slate-800 disabled:opacity-40
+        className={`inline-flex ${dim} items-center justify-center rounded-full text-fg-muted
+          transition hover:bg-surface-variant hover:text-fg disabled:opacity-40
           focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40
-          ${danger ? "hover:bg-red-50 hover:text-red-600" : ""} ${className}`}
+          ${danger ? "hover:bg-danger/10 hover:text-danger" : ""} ${className}`}
         {...rest}
       >
         {icon}

@@ -67,11 +67,11 @@ export function ActionMenu({ items, label = "Mais ações" }: Props) {
               className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm
                 disabled:opacity-40 ${
                   it.danger
-                    ? "text-red-600 hover:bg-red-50"
-                    : "text-slate-700 hover:bg-surface-variant"
+                    ? "text-danger hover:bg-danger/10"
+                    : "text-fg hover:bg-surface-variant"
                 }`}
             >
-              {it.icon && <span className="text-slate-400">{it.icon}</span>}
+              {it.icon && <span className="text-fg-faint">{it.icon}</span>}
               {it.label}
             </button>
           ))}

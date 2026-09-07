@@ -115,7 +115,7 @@ export function ExecutionDetail() {
         subtitle={
           <span className="flex items-center gap-3 text-xs">
             {rest?.attempt ? <span>tentativa #{rest.attempt}</span> : null}
-            <span className={connected ? "text-green-600" : "text-slate-400"}>
+            <span className={connected ? "text-ok" : "text-fg-faint"}>
               {connected ? "● ao vivo" : "○ reconectando"}
             </span>
           </span>
@@ -149,15 +149,15 @@ export function ExecutionDetail() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
-          <div className="text-xs uppercase tracking-wide text-slate-400">Início</div>
+          <div className="text-xs uppercase tracking-wide text-fg-faint">Início</div>
           <div className="mt-1 text-sm">{fmt(rest?.started_at)}</div>
         </Card>
         <Card>
-          <div className="text-xs uppercase tracking-wide text-slate-400">Fim</div>
+          <div className="text-xs uppercase tracking-wide text-fg-faint">Fim</div>
           <div className="mt-1 text-sm">{fmt(rest?.finished_at)}</div>
         </Card>
         <Card>
-          <div className="text-xs uppercase tracking-wide text-slate-400">Duração</div>
+          <div className="text-xs uppercase tracking-wide text-fg-faint">Duração</div>
           <div className="mt-1 text-sm tabular-nums">
             {rest?.duration_ms != null
               ? `${(rest.duration_ms / 1000).toFixed(1)}s`
@@ -167,9 +167,9 @@ export function ExecutionDetail() {
       </div>
 
       {errorMessage && (
-        <Card className="mt-4 border-red-200 bg-red-50">
-          <div className="text-xs font-semibold uppercase tracking-wide text-red-600">Erro</div>
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-xs text-red-700">
+        <Card className="mt-4 border-danger/30 bg-danger/10">
+          <div className="text-xs font-semibold uppercase tracking-wide text-danger">Erro</div>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-xs text-danger">
             {errorMessage}
           </pre>
         </Card>
@@ -177,7 +177,7 @@ export function ExecutionDetail() {
 
       {Object.keys(params).length > 0 && (
         <Card className="mt-4">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-faint">
             Parâmetros
           </div>
           <pre className="overflow-x-auto rounded bg-surface-variant p-3 text-xs">
@@ -195,7 +195,7 @@ export function ExecutionDetail() {
 
       {output && (
         <section className="mt-6">
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">
+          <h2 className="mb-2 text-sm font-semibold text-fg">
             Notebook executado (output.ipynb)
           </h2>
           <NotebookOutputView notebook={output} />

@@ -6,6 +6,7 @@ from nbplatform.core.errors import DomainValidationError
 from nbplatform.domain.notebook_format import (
     has_parameters_cell,
     new_empty_notebook,
+    read_dependencies,
     validate_notebook,
 )
 
@@ -49,6 +50,39 @@ def test_validate_rejects_malformed_cells() -> None:
     bad = {"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"foo": 1}]}
     with pytest.raises(DomainValidationError):
         validate_notebook(bad)
+
+
+def test_read_dependencies_from_list() -> None:
+    nb = {
+        "metadata": {"nbplatform": {"dependencies": ["psycopg[binary]", "pandas==2.2.2"]}},
+    }
+    assert read_dependencies(nb) == ["psycopg[binary]", "pandas==2.2.2"]
+
+
+def test_read_dependencies_from_multiline_string_ignoring_comments_and_blanks() -> None:
+    nb = {
+        "metadata": {
+            "nbplatform": {"dependencies": "requests  # http\n\n  numpy \n# comentário"}
+        },
+    }
+    assert read_dependencies(nb) == ["requests", "numpy"]
+
+
+def test_read_dependencies_dedupes_and_drops_flags_and_control_chars() -> None:
+    nb = {
+        "metadata": {
+            "nbplatform": {
+                "dependencies": ["requests", "requests", "--index-url http://evil", "a\nb"]
+            }
+        },
+    }
+    assert read_dependencies(nb) == ["requests"]
+
+
+def test_read_dependencies_absent_returns_empty() -> None:
+    assert read_dependencies({"metadata": {}}) == []
+    assert read_dependencies({}) == []
+    assert read_dependencies({"metadata": {"nbplatform": {}}}) == []
 
 
 def test_has_parameters_cell_false_when_untagged() -> None:

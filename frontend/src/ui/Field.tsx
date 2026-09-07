@@ -6,8 +6,8 @@ import type {
 } from "react";
 
 const base =
-  "w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-sm text-slate-800 " +
-  "placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 " +
+  "w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-sm text-fg " +
+  "placeholder:text-fg-faint focus:outline-none focus:ring-2 focus:ring-primary/40 " +
   "focus:border-primary disabled:opacity-60";
 
 function Wrap({
@@ -24,13 +24,13 @@ function Wrap({
   return (
     <label className="block">
       {label && (
-        <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+        <span className="mb-1 block text-xs font-medium text-fg-muted">{label}</span>
       )}
       {children}
       {error ? (
-        <span className="mt-1 block text-xs text-red-600">{error}</span>
+        <span className="mt-1 block text-xs text-danger">{error}</span>
       ) : hint ? (
-        <span className="mt-1 block text-xs text-slate-400">{hint}</span>
+        <span className="mt-1 block text-xs text-fg-faint">{hint}</span>
       ) : null}
     </label>
   );
@@ -96,15 +96,15 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className="inline-flex items-center gap-2 text-sm text-slate-700"
+      className="inline-flex items-center gap-2 text-sm text-fg"
     >
       <span
         className={`relative h-5 w-9 rounded-full transition ${
-          checked ? "bg-primary" : "bg-slate-300"
+          checked ? "bg-primary" : "bg-fg/25"
         }`}
       >
         <span
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition ${
             checked ? "left-4" : "left-0.5"
           }`}
         />

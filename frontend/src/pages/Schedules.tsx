@@ -207,9 +207,9 @@ function ScheduleFormDialog({
           </div>
         )}
 
-        <div className="rounded-md bg-surface-variant px-3 py-2 text-xs text-slate-600">
+        <div className="rounded-md bg-surface-variant px-3 py-2 text-xs text-fg-muted">
           <span className="font-medium">{describeCron(effectiveCron)}</span>
-          <span className="ml-2 font-mono text-slate-400">→ {effectiveCron}</span>
+          <span className="ml-2 font-mono text-fg-faint">→ {effectiveCron}</span>
         </div>
 
         <TextField
@@ -283,7 +283,7 @@ function ScheduleCalendar({
   return (
     <div className="surface p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold capitalize text-slate-700">{monthLabel}</h2>
+        <h2 className="text-sm font-semibold capitalize text-fg">{monthLabel}</h2>
         <div className="flex gap-1">
           <IconButton
             label="Mês anterior"
@@ -306,7 +306,7 @@ function ScheduleCalendar({
 
       <div className="grid grid-cols-7 gap-px overflow-hidden rounded border border-surface-border bg-surface-border text-xs">
         {WEEKDAYS.map((d) => (
-          <div key={d} className="bg-surface-variant px-2 py-1.5 text-center font-medium text-slate-500">
+          <div key={d} className="bg-surface-variant px-2 py-1.5 text-center font-medium text-fg-muted">
             {d}
           </div>
         ))}
@@ -321,7 +321,7 @@ function ScheduleCalendar({
                   className={`mb-1 text-right text-[11px] ${
                     isToday(day)
                       ? "inline-block rounded-full bg-primary px-1.5 text-primary-fg"
-                      : "text-slate-400"
+                      : "text-fg-faint"
                   }`}
                 >
                   {day}
@@ -340,7 +340,7 @@ function ScheduleCalendar({
                     </button>
                   ))}
                   {(byDay.get(day)?.length ?? 0) > 3 && (
-                    <div className="text-[10px] text-slate-400">
+                    <div className="text-[10px] text-fg-faint">
                       +{(byDay.get(day)!.length - 3)} mais
                     </div>
                   )}
@@ -453,7 +453,7 @@ export function Schedules() {
       key: "workflow",
       header: "Workflow",
       sortValue: (s) => wfName(s.workflow_id),
-      render: (s) => <span className="font-medium text-slate-800">{wfName(s.workflow_id)}</span>,
+      render: (s) => <span className="font-medium text-fg">{wfName(s.workflow_id)}</span>,
     },
     {
       key: "freq",
@@ -461,8 +461,8 @@ export function Schedules() {
       sortValue: (s) => s.cron,
       render: (s) => (
         <div>
-          <div className="text-slate-700">{describeCron(s.cron)}</div>
-          <div className="font-mono text-[11px] text-slate-400">
+          <div className="text-fg">{describeCron(s.cron)}</div>
+          <div className="font-mono text-[11px] text-fg-faint">
             {s.cron} · {s.timezone}
           </div>
         </div>
@@ -473,7 +473,7 @@ export function Schedules() {
       header: "Próxima execução",
       sortValue: (s) => s.next_run_at ?? "",
       render: (s) => (
-        <span className="text-slate-500">
+        <span className="text-fg-muted">
           {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : "—"}
         </span>
       ),
@@ -547,7 +547,7 @@ export function Schedules() {
             type="button"
             onClick={() => setTab(t)}
             className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 ${
-              tab === t ? "bg-primary-container text-primary-on-container" : "text-slate-500"
+              tab === t ? "bg-primary-container text-primary-on-container" : "text-fg-muted"
             }`}
           >
             <ScheduleIcon className="h-4 w-4" />
@@ -557,9 +557,9 @@ export function Schedules() {
       </div>
 
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar agendamentos.</p>
+        <p className="text-sm text-danger">Falha ao carregar agendamentos.</p>
       ) : isLoading ? (
-        <p className="text-sm text-slate-400">Carregando…</p>
+        <p className="text-sm text-fg-faint">Carregando…</p>
       ) : (schedules ?? []).length === 0 ? (
         <EmptyState
           icon={ScheduleIcon}
@@ -670,8 +670,8 @@ export function Schedules() {
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className="text-slate-400">{label}</dt>
-      <dd className="text-right text-slate-700">{value}</dd>
+      <dt className="text-fg-faint">{label}</dt>
+      <dd className="text-right text-fg">{value}</dd>
     </div>
   );
 }

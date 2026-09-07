@@ -49,4 +49,7 @@ export {
   CircleSlash as CancelledIcon,
   Timer as TimeoutIcon,
   MoveRight as SkippedIcon,
+  Sun as LightIcon,
+  Moon as DarkIcon,
+  MonitorSmartphone as SystemIcon,
 } from "lucide-react";

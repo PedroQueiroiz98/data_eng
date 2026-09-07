@@ -34,7 +34,7 @@ export function Login() {
           <span className="flex h-8 w-8 items-center justify-center rounded bg-primary text-sm font-bold text-primary-fg">
             n
           </span>
-          <span className="text-lg font-semibold text-slate-800">nbplatform</span>
+          <span className="text-lg font-semibold text-fg">nbplatform</span>
         </div>
         <TextField
           label="E-mail"
@@ -51,7 +51,7 @@ export function Login() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && <p className="text-xs text-danger">{error}</p>}
         <Button type="submit" fullWidth loading={busy}>
           Entrar
         </Button>

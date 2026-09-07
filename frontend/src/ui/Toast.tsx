@@ -24,9 +24,9 @@ interface ToastCtx {
 const Ctx = createContext<ToastCtx | null>(null);
 
 const KIND = {
-  success: { cls: "border-green-200 bg-green-50 text-green-800", Icon: CheckIcon },
-  error: { cls: "border-red-200 bg-red-50 text-red-800", Icon: FailIcon },
-  info: { cls: "border-slate-200 bg-surface text-slate-800", Icon: InfoIcon },
+  success: { cls: "border-ok/30 bg-ok/10 text-fg", Icon: CheckIcon },
+  error: { cls: "border-danger/30 bg-danger/10 text-fg", Icon: FailIcon },
+  info: { cls: "border-surface-border bg-surface text-fg", Icon: InfoIcon },
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {

@@ -16,6 +16,48 @@ NBFORMAT_MINOR = 5
 
 PARAMETERS_TAG = "parameters"
 
+# Chave de metadados própria (permitida pelo schema nbformat v4 — additionalProperties).
+NBP_META_KEY = "nbplatform"
+DEPENDENCIES_KEY = "dependencies"
+MAX_DEPENDENCY_SPEC_LEN = 200
+
+
+def read_dependencies(content: dict[str, Any]) -> list[str]:
+    """Lista de requisitos pip declarada em `metadata.nbplatform.dependencies`.
+
+    Aceita lista de strings ou texto multi-linha. Ignora linhas vazias e
+    comentários (`#`). Sanitiza specs perigosos (controle/nova-linha) e limita
+    o tamanho de cada entrada — os pacotes são passados como argv (sem shell).
+    """
+    meta = content.get("metadata")
+    if not isinstance(meta, dict):
+        return []
+    section = meta.get(NBP_META_KEY)
+    raw = section.get(DEPENDENCIES_KEY) if isinstance(section, dict) else None
+    if isinstance(raw, str):
+        items: list[Any] = raw.splitlines()
+    elif isinstance(raw, list):
+        items = list(raw)
+    else:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        spec = item.split("#", 1)[0].strip()
+        if not spec or len(spec) > MAX_DEPENDENCY_SPEC_LEN:
+            continue
+        if any(ch in spec for ch in ("\n", "\r", "\x00")):
+            continue
+        if spec.startswith("-"):  # nada de flags arbitrárias de pip
+            continue
+        if spec not in seen:
+            seen.add(spec)
+            out.append(spec)
+    return out
+
 
 def new_empty_notebook() -> dict[str, Any]:
     """Notebook v4 com uma célula de código vazia e uma célula de parâmetros."""

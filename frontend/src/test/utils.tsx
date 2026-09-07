@@ -3,6 +3,7 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/components/AuthProvider";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import { ConfirmProvider } from "@/ui/ConfirmDialog";
 import { ToastProvider } from "@/ui/Toast";
 
@@ -30,13 +31,15 @@ export function renderWithProviders(ui: ReactElement, opts: Options = {}) {
       children
     );
     const tree = (
-      <QueryClientProvider client={qc}>
-        <ToastProvider>
-          <ConfirmProvider>
-            <MemoryRouter initialEntries={[route]}>{inner}</MemoryRouter>
-          </ConfirmProvider>
-        </ToastProvider>
-      </QueryClientProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={qc}>
+          <ToastProvider>
+            <ConfirmProvider>
+              <MemoryRouter initialEntries={[route]}>{inner}</MemoryRouter>
+            </ConfirmProvider>
+          </ToastProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
     );
     return withAuth ? <AuthProvider>{tree}</AuthProvider> : tree;
   }

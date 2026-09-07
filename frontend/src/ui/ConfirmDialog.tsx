@@ -60,7 +60,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           </>
         }
       >
-        <p className="text-sm text-slate-600">{opts?.message}</p>
+        <p className="text-sm text-fg-muted">{opts?.message}</p>
       </Dialog>
     </Ctx.Provider>
   );

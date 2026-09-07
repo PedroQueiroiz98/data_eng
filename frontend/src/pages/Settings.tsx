@@ -18,16 +18,16 @@ export function Settings() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-faint">
             Sessão
           </h2>
-          <div className="text-sm text-slate-700">{user?.name}</div>
-          <div className="text-sm text-slate-500">{user?.email}</div>
-          <div className="mt-1 text-xs uppercase tracking-wide text-slate-400">{user?.role}</div>
+          <div className="text-sm text-fg">{user?.name}</div>
+          <div className="text-sm text-fg-muted">{user?.email}</div>
+          <div className="mt-1 text-xs uppercase tracking-wide text-fg-faint">{user?.role}</div>
         </Card>
 
         <Card>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-faint">
             Observabilidade
           </h2>
           <a
@@ -43,22 +43,22 @@ export function Settings() {
       </div>
 
       <Card className="mt-4" padded={false}>
-        <h2 className="border-b border-surface-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <h2 className="border-b border-surface-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-fg-faint">
           Saúde dos serviços
         </h2>
         {data ? (
           <ul className="divide-y divide-surface-border text-sm">
             {Object.entries(data.checks).map(([name, c]) => (
               <li key={name} className="flex justify-between px-4 py-2.5">
-                <span className="capitalize text-slate-600">{name}</span>
-                <span className={c.ok ? "text-green-600" : "text-red-600"}>
+                <span className="capitalize text-fg-muted">{name}</span>
+                <span className={c.ok ? "text-ok" : "text-danger"}>
                   {c.ok ? "ok" : (c.detail ?? "indisponível")}
                 </span>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="px-4 py-6 text-sm text-slate-400">Carregando…</p>
+          <p className="px-4 py-6 text-sm text-fg-faint">Carregando…</p>
         )}
       </Card>
     </div>

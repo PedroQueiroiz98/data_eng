@@ -88,14 +88,14 @@ export function Secrets() {
       key: "key",
       header: "Chave",
       sortValue: (s) => s.key,
-      render: (s) => <span className="font-mono text-slate-800">{s.key}</span>,
+      render: (s) => <span className="font-mono text-fg">{s.key}</span>,
     },
     {
       key: "updated",
       header: "Atualizado",
       sortValue: (s) => s.updated_at,
       render: (s) => (
-        <span className="text-slate-500">{new Date(s.updated_at).toLocaleString()}</span>
+        <span className="text-fg-muted">{new Date(s.updated_at).toLocaleString()}</span>
       ),
     },
     {
@@ -127,7 +127,7 @@ export function Secrets() {
       />
 
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar secrets.</p>
+        <p className="text-sm text-danger">Falha ao carregar secrets.</p>
       ) : (
         <DataTable
           columns={columns}

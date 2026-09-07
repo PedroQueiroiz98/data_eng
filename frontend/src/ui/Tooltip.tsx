@@ -29,8 +29,8 @@ export function Tooltip({ label, children, side = "top" }: Props) {
         <span
           role="tooltip"
           id={id}
-          className={`pointer-events-none absolute z-50 whitespace-nowrap rounded bg-slate-900 px-2
-            py-1 text-xs font-medium text-white shadow-e2 animate-fade-in ${POS[side]}`}
+          className={`pointer-events-none absolute z-50 whitespace-nowrap rounded bg-fg px-2
+            py-1 text-xs font-medium text-surface shadow-e2 animate-fade-in ${POS[side]}`}
         >
           {label}
         </span>

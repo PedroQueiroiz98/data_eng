@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { IconButton } from "@/ui/IconButton";
 import { LogoutIcon, MenuIcon, SettingsIcon } from "@/ui/icons";
 
@@ -32,6 +33,7 @@ export function Header({ onMenu }: { onMenu: () => void }) {
       </div>
 
       <div className="ml-auto flex items-center gap-1" ref={ref}>
+        <ThemeToggle />
         <div className="relative">
           <button
             type="button"
@@ -43,7 +45,7 @@ export function Header({ onMenu }: { onMenu: () => void }) {
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-container text-xs font-semibold text-primary-on-container">
               {initials(user?.name, user?.email)}
             </span>
-            <span className="hidden text-slate-700 sm:block">{user?.name ?? user?.email}</span>
+            <span className="hidden text-fg sm:block">{user?.name ?? user?.email}</span>
           </button>
 
           {open && (
@@ -53,11 +55,11 @@ export function Header({ onMenu }: { onMenu: () => void }) {
                 border border-surface-border bg-surface py-1 shadow-e3 animate-slide-up"
             >
               <div className="border-b border-surface-border px-3 py-2">
-                <div className="truncate text-sm font-medium text-slate-800">
+                <div className="truncate text-sm font-medium text-fg">
                   {user?.name}
                 </div>
-                <div className="truncate text-xs text-slate-500">{user?.email}</div>
-                <div className="mt-0.5 text-[11px] uppercase tracking-wide text-slate-400">
+                <div className="truncate text-xs text-fg-muted">{user?.email}</div>
+                <div className="mt-0.5 text-[11px] uppercase tracking-wide text-fg-faint">
                   {user?.role}
                 </div>
               </div>
@@ -68,9 +70,9 @@ export function Header({ onMenu }: { onMenu: () => void }) {
                   setOpen(false);
                   navigate("/settings");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-surface-variant"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-fg hover:bg-surface-variant"
               >
-                <SettingsIcon className="h-4 w-4 text-slate-400" />
+                <SettingsIcon className="h-4 w-4 text-fg-faint" />
                 Configuração
               </button>
               <button
@@ -80,7 +82,7 @@ export function Header({ onMenu }: { onMenu: () => void }) {
                   setOpen(false);
                   logout();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-danger hover:bg-danger/10"
               >
                 <LogoutIcon className="h-4 w-4" />
                 Sair

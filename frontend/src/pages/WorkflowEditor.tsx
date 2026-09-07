@@ -14,6 +14,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { TaskNode, type TaskNodeData } from "@/components/workflow/TaskNode";
+import { useTheme } from "@/components/ThemeProvider";
 import { useRunWorkflow } from "@/hooks/useJobs";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useSaveGraph, useUpdateWorkflow, useWorkflow } from "@/hooks/useWorkflows";
@@ -51,6 +52,7 @@ function toFlow(wf: WorkflowDetail): { nodes: Node[]; edges: Edge[] } {
 function EditorInner({ id }: { id: string }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { theme } = useTheme();
   const { data: wf, isLoading, isError } = useWorkflow(id);
   const { data: notebooks } = useNotebooks();
   const saveGraph = useSaveGraph(id);
@@ -149,8 +151,8 @@ function EditorInner({ id }: { id: string }) {
     [nodes, selectedId],
   );
 
-  if (isLoading) return <p className="text-sm text-slate-400">Carregando…</p>;
-  if (isError || !wf) return <p className="text-sm text-red-600">Workflow não encontrado.</p>;
+  if (isLoading) return <p className="text-sm text-fg-faint">Carregando…</p>;
+  if (isError || !wf) return <p className="text-sm text-danger">Workflow não encontrado.</p>;
 
   return (
     <div className="flex h-[calc(100vh-9rem)] flex-col">
@@ -205,14 +207,15 @@ function EditorInner({ id }: { id: string }) {
       />
 
       {(run.isError || saveGraph.isError) && (
-        <p className="mb-2 text-sm text-red-600">
+        <p className="mb-2 text-sm text-danger">
           {((run.error ?? saveGraph.error) as Error).message}
         </p>
       )}
 
       <div className="flex min-h-0 flex-1 gap-3">
-        <div className="min-w-0 flex-1 rounded border border-slate-200">
+        <div className="min-w-0 flex-1 rounded border border-surface-border">
           <ReactFlow
+            colorMode={theme}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
@@ -228,29 +231,29 @@ function EditorInner({ id }: { id: string }) {
           </ReactFlow>
         </div>
 
-        <aside className="w-64 shrink-0 rounded border border-slate-200 p-3 text-sm">
+        <aside className="w-64 shrink-0 rounded border border-surface-border p-3 text-sm">
           {!selected && (
-            <p className="text-slate-500">Selecione uma tarefa para editar.</p>
+            <p className="text-fg-muted">Selecione uma tarefa para editar.</p>
           )}
           {selected && (
             <div className="space-y-3">
               <label className="block">
-                <span className="text-xs text-slate-500">Nome</span>
+                <span className="text-xs text-fg-muted">Nome</span>
                 <input
                   value={(selected.data as TaskNodeData).name}
                   onChange={(e) => patchSelected({ name: e.target.value })}
-                  className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1"
+                  className="mt-0.5 w-full rounded border border-surface-border px-2 py-1"
                 />
               </label>
               <label className="block">
-                <span className="text-xs text-slate-500">Notebook</span>
+                <span className="text-xs text-fg-muted">Notebook</span>
                 <select
                   value={(selected.data as TaskNodeData).notebookId ?? ""}
                   onChange={(e) => {
                     const nid = e.target.value || null;
                     patchSelected({ notebookId: nid, notebookName: notebookName(nid) });
                   }}
-                  className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1"
+                  className="mt-0.5 w-full rounded border border-surface-border px-2 py-1"
                 >
                   <option value="">—</option>
                   {notebooks?.map((n) => (
@@ -261,7 +264,7 @@ function EditorInner({ id }: { id: string }) {
                 </select>
               </label>
               <label className="block">
-                <span className="text-xs text-slate-500">Timeout (s)</span>
+                <span className="text-xs text-fg-muted">Timeout (s)</span>
                 <input
                   type="number"
                   min={1}
@@ -271,11 +274,11 @@ function EditorInner({ id }: { id: string }) {
                       timeoutS: e.target.value ? Number(e.target.value) : null,
                     })
                   }
-                  className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1"
+                  className="mt-0.5 w-full rounded border border-surface-border px-2 py-1"
                 />
               </label>
               <label className="block">
-                <span className="text-xs text-slate-500">Máx. retries</span>
+                <span className="text-xs text-fg-muted">Máx. retries</span>
                 <input
                   type="number"
                   min={0}
@@ -284,7 +287,7 @@ function EditorInner({ id }: { id: string }) {
                   onChange={(e) =>
                     patchSelected({ maxRetries: Number(e.target.value) || 0 })
                   }
-                  className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1"
+                  className="mt-0.5 w-full rounded border border-surface-border px-2 py-1"
                 />
               </label>
             </div>

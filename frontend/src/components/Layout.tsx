@@ -11,7 +11,7 @@ export function Layout() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-slate-400">
+      <div className="flex h-full items-center justify-center text-fg-faint">
         <SpinnerIcon className="h-6 w-6 animate-spin" />
       </div>
     );
@@ -19,7 +19,7 @@ export function Layout() {
   if (!user) return <Navigate to="/login" replace />;
 
   return (
-    <div className="flex h-full bg-surface-variant text-slate-800">
+    <div className="flex h-full bg-surface-variant text-fg">
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header onMenu={() => setMobileOpen(true)} />

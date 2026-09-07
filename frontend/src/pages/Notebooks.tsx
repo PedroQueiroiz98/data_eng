@@ -79,9 +79,9 @@ export function Notebooks() {
       sortValue: (n) => n.name,
       render: (n) => (
         <div>
-          <div className="font-medium text-slate-800">{n.name}</div>
+          <div className="font-medium text-fg">{n.name}</div>
           {n.description && (
-            <div className="text-xs text-slate-500">{n.description}</div>
+            <div className="text-xs text-fg-muted">{n.description}</div>
           )}
         </div>
       ),
@@ -90,14 +90,14 @@ export function Notebooks() {
       key: "version",
       header: "Versão",
       sortValue: (n) => n.current_version,
-      render: (n) => <span className="tabular-nums text-slate-600">v{n.current_version}</span>,
+      render: (n) => <span className="tabular-nums text-fg-muted">v{n.current_version}</span>,
     },
     {
       key: "updated",
       header: "Atualizado",
       sortValue: (n) => n.updated_at,
       render: (n) => (
-        <span className="text-slate-500">{new Date(n.updated_at).toLocaleString()}</span>
+        <span className="text-fg-muted">{new Date(n.updated_at).toLocaleString()}</span>
       ),
     },
     {
@@ -157,7 +157,7 @@ export function Notebooks() {
       />
 
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar notebooks.</p>
+        <p className="text-sm text-danger">Falha ao carregar notebooks.</p>
       ) : (
         <DataTable
           columns={columns}

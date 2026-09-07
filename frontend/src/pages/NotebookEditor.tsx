@@ -4,8 +4,8 @@ import { CellCard } from "@/components/notebook/CellCard";
 import { useExecuteNotebook } from "@/hooks/useExecutions";
 import { useNotebook, useSaveVersion, useUpdateNotebook } from "@/hooks/useNotebooks";
 import { useNotebookEditor } from "@/store/notebookEditor";
-import { Button, Dialog, PageHeader, TextArea, useToast } from "@/ui";
-import { AddIcon, RunIcon, SaveIcon } from "@/ui/icons";
+import { Button, Card, Dialog, PageHeader, TextArea, useToast } from "@/ui";
+import { AddIcon, ChevronDownIcon, ChevronRightIcon, RunIcon, SaveIcon } from "@/ui/icons";
 
 export function NotebookEditor() {
   const { id = "" } = useParams();
@@ -16,9 +16,11 @@ export function NotebookEditor() {
   const updateMeta = useUpdateNotebook(id);
   const execute = useExecuteNotebook(id);
 
-  const { cells, dirty, load, addCell, toContent, markSaved } = useNotebookEditor();
+  const { cells, dirty, dependencies, setDependencies, load, addCell, toContent, markSaved } =
+    useNotebookEditor();
   const [name, setName] = useState("");
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
+  const [showDeps, setShowDeps] = useState(false);
   const [showRun, setShowRun] = useState(false);
   const [paramsText, setParamsText] = useState("{}");
   const [paramsError, setParamsError] = useState<string | null>(null);
@@ -31,8 +33,13 @@ export function NotebookEditor() {
     }
   }, [notebook, loadedVersion, load]);
 
-  if (isLoading) return <p className="text-sm text-slate-400">Carregando…</p>;
-  if (isError || !notebook) return <p className="text-sm text-red-600">Notebook não encontrado.</p>;
+  const depCount = dependencies
+    .split("\n")
+    .map((l) => l.split("#", 1)[0]!.trim())
+    .filter(Boolean).length;
+
+  if (isLoading) return <p className="text-sm text-fg-faint">Carregando…</p>;
+  if (isError || !notebook) return <p className="text-sm text-danger">Notebook não encontrado.</p>;
 
   const onSave = async () => {
     if (name.trim() && name.trim() !== notebook.name) {
@@ -76,7 +83,7 @@ export function NotebookEditor() {
               v{notebook.current_version} · {notebook.version_count} versões
             </span>
             {dirty && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700">
+              <span className="rounded-full bg-warn/15 px-2 py-0.5 font-medium text-warn">
                 alterações não salvas
               </span>
             )}
@@ -101,10 +108,41 @@ export function NotebookEditor() {
       />
 
       {save.isError && (
-        <p className="mb-3 text-sm text-red-600">
+        <p className="mb-3 text-sm text-danger">
           Erro ao salvar: {(save.error as Error).message}
         </p>
       )}
+
+      <Card className="mb-3" padded={false}>
+        <button
+          type="button"
+          onClick={() => setShowDeps((v) => !v)}
+          className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-fg"
+        >
+          {showDeps ? (
+            <ChevronDownIcon className="h-4 w-4 text-fg-faint" />
+          ) : (
+            <ChevronRightIcon className="h-4 w-4 text-fg-faint" />
+          )}
+          Dependências (pip)
+          {depCount > 0 && (
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+              {depCount}
+            </span>
+          )}
+        </button>
+        {showDeps && (
+          <div className="border-t border-surface-border px-4 py-3">
+            <TextArea
+              rows={4}
+              value={dependencies}
+              placeholder={"psycopg[binary]\npandas==2.2.2\nrequests"}
+              onChange={(e) => setDependencies(e.target.value)}
+              hint="Um requisito pip por linha. Instalados antes da execução, isolados por execução. Também é possível usar %pip install numa célula."
+            />
+          </div>
+        )}
+      </Card>
 
       <div className="space-y-3">
         {cells.map((cell, i) => (

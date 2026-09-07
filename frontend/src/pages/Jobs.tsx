@@ -31,7 +31,7 @@ export function Jobs() {
       key: "trigger",
       header: "Gatilho",
       sortValue: (j) => j.trigger_type,
-      render: (j) => <span className="text-slate-600">{j.trigger_type}</span>,
+      render: (j) => <span className="text-fg-muted">{j.trigger_type}</span>,
     },
     {
       key: "duration",
@@ -44,7 +44,7 @@ export function Jobs() {
       header: "Criado",
       sortValue: (j) => j.created_at,
       render: (j) => (
-        <span className="text-slate-500">{new Date(j.created_at).toLocaleString()}</span>
+        <span className="text-fg-muted">{new Date(j.created_at).toLocaleString()}</span>
       ),
     },
   ];
@@ -53,7 +53,7 @@ export function Jobs() {
     <div>
       <PageHeader title="Jobs" subtitle="Execuções de workflows." />
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar jobs.</p>
+        <p className="text-sm text-danger">Falha ao carregar jobs.</p>
       ) : (
         <DataTable
           columns={columns}

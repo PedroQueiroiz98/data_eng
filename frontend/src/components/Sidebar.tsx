@@ -99,14 +99,14 @@ export function Sidebar({ mobileOpen, onClose }: Props) {
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-primary text-sm font-bold text-primary-fg">
             n
           </span>
-          <span className={`text-base font-semibold text-slate-800 ${labelCls}`}>nbplatform</span>
+          <span className={`text-base font-semibold text-fg ${labelCls}`}>nbplatform</span>
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-3">
           {GROUPS.map((group) => (
             <div key={group.heading ?? "root"} className="mb-4">
               {group.heading && (
-                <div className={`mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 ${labelCls}`}>
+                <div className={`mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-fg-faint ${labelCls}`}>
                   {group.heading}
                 </div>
               )}
@@ -120,7 +120,7 @@ export function Sidebar({ mobileOpen, onClose }: Props) {
                        ${
                          isActive
                            ? "bg-primary-container font-medium text-primary-on-container"
-                           : "text-slate-600 hover:bg-surface-variant"
+                           : "text-fg-muted hover:bg-surface-variant"
                        }`
                     }
                   >
@@ -144,7 +144,7 @@ export function Sidebar({ mobileOpen, onClose }: Props) {
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           className="hidden items-center gap-2 border-t border-surface-border px-4 py-2.5 text-xs
-            text-slate-500 hover:bg-surface-variant md:flex"
+            text-fg-muted hover:bg-surface-variant md:flex"
         >
           {collapsed ? <ExpandIcon className="h-4 w-4" /> : <CollapseIcon className="h-4 w-4" />}
           <span className={labelCls}>Recolher</span>

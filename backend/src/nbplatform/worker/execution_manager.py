@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -19,11 +20,13 @@ from nbplatform.core.errors import ConflictError
 from nbplatform.core.masking import mask_secrets
 from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import ExecutionStatus, LogLevel
+from nbplatform.domain.notebook_format import read_dependencies
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.services.retry_coordinator import RetryCoordinator
 from nbplatform.services.secret_service import SecretService
 from nbplatform.services.variable_service import VariableService
+from nbplatform.worker.pip_installer import install_packages
 from nbplatform.worker.sandbox import run_sandboxed
 from nbplatform.ws.events import make_event, publish_execution_event
 
@@ -57,12 +60,23 @@ class ExecutionManager:
         input_path = workdir / "input.ipynb"
         output_path = workdir / "output.ipynb"
         params_path = workdir / "params.json"
+        pydeps_dir = workdir / ".pydeps"
+        pydeps_dir.mkdir(parents=True, exist_ok=True)
         input_path.write_text(json.dumps(_ensure_language(content)), encoding="utf-8")
         params_path.write_text(
             json.dumps(await self._parameters(exec_uuid)), encoding="utf-8"
         )
 
-        env = await self._build_env()
+        env = await self._build_env(pydeps_dir)
+
+        if not await self._install_dependencies(exec_uuid, attempt, content, pydeps_dir):
+            msg = "falha ao instalar dependências declaradas (pip)"
+            await self._finish(
+                exec_uuid, ExecutionStatus.FAILED, "DEPENDENCY_ERROR", msg, None, None
+            )
+            return await self._handle_failure(
+                exec_uuid, ExecutionStatus.FAILED, "DEPENDENCY_ERROR", msg
+            )
 
         cancel_event = asyncio.Event()
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(exec_uuid))
@@ -212,8 +226,8 @@ class ExecutionManager:
         )
         return masked
 
-    async def _build_env(self) -> dict[str, str]:
-        """Variáveis (visíveis) + secrets (cifrados) → env vars da execução."""
+    async def _build_env(self, pydeps_dir: Path) -> dict[str, str]:
+        """Variáveis (visíveis) + secrets (cifrados) + alvo pip → env vars da execução."""
         async with session_scope() as session:
             variables = await VariableService(session).resolve()
             secrets = await SecretService(session).resolve_all()
@@ -221,7 +235,59 @@ class ExecutionManager:
         merged: dict[str, str] = {}
         merged.update({k: str(v) for k, v in variables.items()})
         merged.update({k: str(v) for k, v in secrets.items()})
+        merged.update(self._pip_env(pydeps_dir))
         return merged
+
+    def _pip_env(self, pydeps_dir: Path) -> dict[str, str]:
+        """Isola instalações pip da execução num diretório próprio.
+
+        `PIP_TARGET` faz `%pip install` (e `!pip`) escreverem ali; `PYTHONPATH`
+        deixa os pacotes importáveis. No sandbox Docker o workdir é montado em
+        `/work`, então os caminhos são reescritos para dentro do container.
+        """
+        if not self.settings.execution_pip_install:
+            return {}
+        if self.settings.execution_sandbox == "docker":
+            deps_path = "/work/.pydeps"
+        else:
+            deps_path = str(pydeps_dir)
+        prev = os.environ.get("PYTHONPATH", "")
+        pythonpath = os.pathsep.join([deps_path, prev]) if prev else deps_path
+        env = {
+            "PIP_TARGET": deps_path,
+            "PIP_NO_INPUT": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PYTHONPATH": pythonpath,
+        }
+        if self.settings.execution_pip_index_url:
+            env["PIP_INDEX_URL"] = self.settings.execution_pip_index_url
+        return env
+
+    async def _install_dependencies(
+        self,
+        exec_uuid: uuid.UUID,
+        attempt: int,
+        content: dict[str, Any],
+        pydeps_dir: Path,
+    ) -> bool:
+        """Instala `metadata.nbplatform.dependencies` antes de rodar o notebook."""
+        if not self.settings.execution_pip_install:
+            return True
+        packages = read_dependencies(content)[: self.settings.execution_pip_max_packages]
+        if not packages:
+            return True
+        await self._emit_log(
+            exec_uuid,
+            attempt,
+            f"instalando {len(packages)} dependência(s): {', '.join(packages)}",
+        )
+        return await install_packages(
+            target_dir=str(pydeps_dir),
+            packages=packages,
+            on_line=lambda line: self._emit_log(exec_uuid, attempt, line),
+            timeout_s=float(self.settings.execution_pip_timeout_s),
+            index_url=self.settings.execution_pip_index_url or None,
+        )
 
     async def _emit_log(self, exec_uuid: uuid.UUID, attempt: int, line: str) -> None:
         if self._secret_values:

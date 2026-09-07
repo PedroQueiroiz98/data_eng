@@ -95,14 +95,14 @@ export function DataTable<T>({
           }}
           placeholder={searchPlaceholder}
           className="w-full max-w-xs rounded-md border border-surface-border bg-surface px-3 py-2
-            text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            text-sm placeholder:text-fg-faint focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       )}
 
       <div className="surface overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-surface-variant text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr className="bg-surface-variant text-left text-xs font-semibold uppercase tracking-wide text-fg-muted">
               {columns.map((c) => (
                 <th
                   key={c.key}
@@ -144,7 +144,7 @@ export function DataTable<T>({
             ))}
             {pageRows.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={columns.length} className="px-4 py-8 text-center text-fg-faint">
                   Nenhum resultado.
                 </td>
               </tr>
@@ -154,7 +154,7 @@ export function DataTable<T>({
       </div>
 
       {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-xs text-slate-500">
+        <div className="flex items-center justify-end gap-2 text-xs text-fg-muted">
           <span>
             {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, filtered.length)} de{" "}
             {filtered.length}
@@ -182,5 +182,5 @@ export function DataTable<T>({
 }
 
 function Skel() {
-  return <div className="h-9 w-full max-w-xs animate-pulse rounded-md bg-slate-200/70" />;
+  return <div className="h-9 w-full max-w-xs animate-pulse rounded-md bg-fg/10" />;
 }

@@ -84,4 +84,38 @@ describe("notebookEditor store", () => {
     store().markSaved();
     expect(store().dirty).toBe(false);
   });
+
+  it("carrega dependências de metadata.nbplatform e as reescreve em toContent", () => {
+    store().load(
+      structuredClone({
+        ...baseContent,
+        metadata: {
+          language_info: { name: "python" },
+          nbplatform: { dependencies: ["psycopg[binary]", "requests"] },
+        },
+      }),
+    );
+    expect(store().dependencies).toBe("psycopg[binary]\nrequests");
+
+    store().setDependencies("pandas==2.2.2\n# comentário\n\nnumpy");
+    expect(store().dirty).toBe(true);
+    const meta = store().toContent().metadata as Record<string, unknown>;
+    expect((meta.nbplatform as Record<string, unknown>).dependencies).toEqual([
+      "pandas==2.2.2",
+      "numpy",
+    ]);
+    expect((meta.language_info as Record<string, unknown>).name).toBe("python");
+  });
+
+  it("toContent remove nbplatform.dependencies quando a lista fica vazia", () => {
+    store().load(
+      structuredClone({
+        ...baseContent,
+        metadata: { nbplatform: { dependencies: ["requests"] } },
+      }),
+    );
+    store().setDependencies("   \n# só comentário");
+    const meta = store().toContent().metadata as Record<string, unknown>;
+    expect(meta.nbplatform).toBeUndefined();
+  });
 });

@@ -87,7 +87,7 @@ export function Executions() {
       render: (e) => (
         <div className="flex items-center gap-2">
           <StatusChip status={e.status} />
-          {e.error_code && <span className="text-xs text-red-600">{e.error_code}</span>}
+          {e.error_code && <span className="text-xs text-danger">{e.error_code}</span>}
         </div>
       ),
     },
@@ -114,7 +114,7 @@ export function Executions() {
       header: "Criada",
       sortValue: (e) => e.created_at,
       render: (e) => (
-        <span className="text-slate-500">{new Date(e.created_at).toLocaleString()}</span>
+        <span className="text-fg-muted">{new Date(e.created_at).toLocaleString()}</span>
       ),
     },
     {
@@ -180,7 +180,7 @@ export function Executions() {
       </div>
 
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar execuções.</p>
+        <p className="text-sm text-danger">Falha ao carregar execuções.</p>
       ) : (
         <DataTable
           columns={columns}

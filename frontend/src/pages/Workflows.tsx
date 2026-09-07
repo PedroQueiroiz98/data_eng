@@ -71,7 +71,7 @@ export function Workflows() {
       key: "name",
       header: "Nome",
       sortValue: (w) => w.name,
-      render: (w) => <span className="font-medium text-slate-800">{w.name}</span>,
+      render: (w) => <span className="font-medium text-fg">{w.name}</span>,
     },
     {
       key: "status",
@@ -84,7 +84,7 @@ export function Workflows() {
       header: "Atualizado",
       sortValue: (w) => w.updated_at,
       render: (w) => (
-        <span className="text-slate-500">{new Date(w.updated_at).toLocaleString()}</span>
+        <span className="text-fg-muted">{new Date(w.updated_at).toLocaleString()}</span>
       ),
     },
     {
@@ -139,7 +139,7 @@ export function Workflows() {
       />
 
       {isError ? (
-        <p className="text-sm text-red-600">Falha ao carregar workflows.</p>
+        <p className="text-sm text-danger">Falha ao carregar workflows.</p>
       ) : (
         <DataTable
           columns={columns}

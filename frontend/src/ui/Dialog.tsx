@@ -34,7 +34,7 @@ export function Dialog({ open, onClose, title, children, footer, width = "md" }:
         className={`w-full ${W[width]} overflow-hidden rounded-lg bg-surface shadow-e4 animate-slide-up`}
       >
         <div className="flex items-center justify-between border-b border-surface-border px-5 py-3">
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+          <h2 className="text-base font-semibold text-fg">{title}</h2>
           <IconButton label="Fechar" size="sm" icon={<CloseIcon className="h-4 w-4" />} onClick={onClose} />
         </div>
         <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
