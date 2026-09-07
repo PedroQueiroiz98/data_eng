@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nbplatform.core.errors import ConflictError, NotFoundError
 from nbplatform.db.session import session_scope
-from nbplatform.domain.enums import ExecutionStatus, LogLevel
+from nbplatform.domain.enums import ExecutionSource, ExecutionStatus, LogLevel
 from nbplatform.domain.state_machine import assert_transition
 from nbplatform.models.execution import Execution, ExecutionLog
 from nbplatform.models.job import JobTask
@@ -71,6 +71,38 @@ class ExecutionService:
 
         execution = Execution(
             notebook_version_id=version.id,
+            status=ExecutionStatus.QUEUED,
+            parameters=parameters,
+            attempt=1,
+            idempotency_key=idempotency_key,
+        )
+        await self.repo.add(execution)
+        return execution, True
+
+    async def create_for_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        notebook_path: str,
+        *,
+        parameters: dict[str, Any],
+        source_commit: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> tuple[Execution, bool]:
+        """Execução de um `.ipynb` que vive em disco num Workspace (source=WORKSPACE).
+
+        Não há `NotebookVersion`: o worker materializa o input a partir do arquivo
+        (ou do commit `source_commit`, quando houver repositório Git).
+        """
+        if idempotency_key:
+            existing = await self.repo.get_by_idempotency_key(idempotency_key)
+            if existing is not None:
+                return existing, False
+
+        execution = Execution(
+            source=ExecutionSource.WORKSPACE,
+            workspace_id=workspace_id,
+            notebook_path=notebook_path,
+            source_commit=source_commit,
             status=ExecutionStatus.QUEUED,
             parameters=parameters,
             attempt=1,

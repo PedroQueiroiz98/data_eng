@@ -7,7 +7,7 @@ from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, Unique
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nbplatform.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from nbplatform.domain.enums import GitProvider
+from nbplatform.domain.enums import GitProvider, WorkspaceRole
 
 
 class Workspace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -28,6 +28,34 @@ class Workspace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     git_repository: Mapped[WorkspaceGitRepository | None] = relationship(
         back_populates="workspace", cascade="all, delete-orphan", uselist=False
     )
+    members: Mapped[list[WorkspaceMember]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan"
+    )
+
+
+class WorkspaceMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """ACL por Workspace: (workspace, user) → papel. Admin global ignora esta tabela."""
+
+    __tablename__ = "workspace_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", name="uq_workspace_member_workspace_user"
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[WorkspaceRole] = mapped_column(
+        Enum(WorkspaceRole, native_enum=False, length=20),
+        default=WorkspaceRole.VIEWER,
+        nullable=False,
+    )
+
+    workspace: Mapped[Workspace] = relationship(back_populates="members")
 
 
 class WorkspaceGitRepository(UUIDPrimaryKeyMixin, TimestampMixin, Base):

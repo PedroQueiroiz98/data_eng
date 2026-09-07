@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
 from nbplatform.core.config import get_settings
-from nbplatform.core.errors import ConflictError, NotFoundError
-from nbplatform.domain.enums import ExecutionStatus
+from nbplatform.core.errors import ConflictError, DomainValidationError, NotFoundError
+from nbplatform.domain.enums import ExecutionStatus, WorkspaceRole
 from nbplatform.domain.workspace_layout import (
     GITIGNORE_TEXT,
     SKELETON_DIRS,
@@ -24,7 +24,7 @@ from nbplatform.domain.workspace_layout import (
     slugify,
 )
 from nbplatform.models.execution import Execution
-from nbplatform.models.workspace import Workspace
+from nbplatform.models.workspace import Workspace, WorkspaceMember
 from nbplatform.repositories.workspace_repository import WorkspaceRepository
 
 _SLUG_ATTEMPTS = 50
@@ -66,6 +66,19 @@ class WorkspaceService:
         # carregado para o model_validate não disparar lazy-load (async).
         set_committed_value(workspace, "git_repository", None)
         await self.session.flush()
+
+        # O criador vira OWNER (ACL). Admin global tem bypass, mas registrar o
+        # vínculo mantém a listagem por membro consistente.
+        if owner_id is not None:
+            self.session.add(
+                WorkspaceMember(
+                    workspace_id=workspace_id,
+                    user_id=owner_id,
+                    role=WorkspaceRole.OWNER,
+                )
+            )
+            await self.session.flush()
+
         await asyncio.to_thread(
             _provision_tree,
             root,
@@ -89,11 +102,57 @@ class WorkspaceService:
         return workspace
 
     async def list_workspaces(
-        self, *, limit: int, offset: int, include_inactive: bool
+        self,
+        *,
+        limit: int,
+        offset: int,
+        include_inactive: bool,
+        member_user_id: uuid.UUID | None = None,
     ) -> list[Workspace]:
         return await self.repo.list_paged(
-            limit=limit, offset=offset, include_inactive=include_inactive
+            limit=limit,
+            offset=offset,
+            include_inactive=include_inactive,
+            member_user_id=member_user_id,
         )
+
+    # ── membros (ACL) ────────────────────────────────────────────────────────
+    async def list_members(self, workspace_id: uuid.UUID) -> list[WorkspaceMember]:
+        await self.get(workspace_id)
+        return await self.repo.list_members(workspace_id)
+
+    async def set_member(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID, role: WorkspaceRole
+    ) -> WorkspaceMember:
+        await self.get(workspace_id)
+        existing = await self.repo.get_member(workspace_id, user_id)
+        # Rebaixar o último OWNER deixaria o Workspace sem dono.
+        if (
+            existing is not None
+            and existing.role == WorkspaceRole.OWNER
+            and role != WorkspaceRole.OWNER
+            and await self.repo.count_owners(workspace_id) <= 1
+        ):
+            raise DomainValidationError(
+                "O Workspace precisa de ao menos um OWNER."
+            )
+        return await self.repo.upsert_member(workspace_id, user_id, role)
+
+    async def remove_member(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID
+    ) -> None:
+        await self.get(workspace_id)
+        member = await self.repo.get_member(workspace_id, user_id)
+        if member is None:
+            raise NotFoundError("Membro não encontrado neste Workspace.")
+        if (
+            member.role == WorkspaceRole.OWNER
+            and await self.repo.count_owners(workspace_id) <= 1
+        ):
+            raise DomainValidationError(
+                "Não é possível remover o único OWNER do Workspace."
+            )
+        await self.repo.remove_member(member)
 
     async def update(
         self,
@@ -111,6 +170,9 @@ class WorkspaceService:
         if is_active is not None:
             workspace.is_active = is_active
         await self.session.flush()
+        # `updated_at` tem onupdate=func.now(): o flush o expira e a leitura
+        # síncrona (pydantic) dispararia lazy IO fora do greenlet → refresh aqui.
+        await self.session.refresh(workspace, attribute_names=["updated_at"])
         return workspace
 
     async def delete(self, workspace_id: uuid.UUID, *, purge: bool) -> None:

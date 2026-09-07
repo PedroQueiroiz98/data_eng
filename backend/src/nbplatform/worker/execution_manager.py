@@ -19,8 +19,9 @@ from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError
 from nbplatform.core.masking import mask_secrets
 from nbplatform.db.session import session_scope
-from nbplatform.domain.enums import ExecutionStatus, LogLevel
+from nbplatform.domain.enums import ExecutionSource, ExecutionStatus, LogLevel
 from nbplatform.domain.notebook_format import read_dependencies
+from nbplatform.domain.workspace_paths import resolve_within
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.services.retry_coordinator import RetryCoordinator
@@ -49,7 +50,7 @@ class ExecutionManager:
         workdir.mkdir(parents=True, exist_ok=True)
 
         try:
-            content, timeout_s = await self._start(exec_uuid, attempt)
+            content, timeout_s, workspace_root = await self._start(exec_uuid, attempt)
         except ConflictError:
             logger.info(
                 "execução não está QUEUED; ignorando", extra={"execution_id": execution_id}
@@ -67,7 +68,7 @@ class ExecutionManager:
             json.dumps(await self._parameters(exec_uuid)), encoding="utf-8"
         )
 
-        env = await self._build_env(pydeps_dir)
+        env = await self._build_env(pydeps_dir, workspace_root=workspace_root)
 
         if not await self._install_dependencies(exec_uuid, attempt, content, pydeps_dir):
             msg = "falha ao instalar dependências declaradas (pip)"
@@ -195,28 +196,39 @@ class ExecutionManager:
     # ── passos ───────────────────────────────────────────────────────────────
     async def _start(
         self, exec_uuid: uuid.UUID, attempt: int
-    ) -> tuple[dict[str, Any], int | None]:
+    ) -> tuple[dict[str, Any], int | None, str | None]:
         async with session_scope() as session:
             service = ExecutionService(session)
             execution = await service.mark_running(
                 exec_uuid, worker_id=self.worker_id, attempt=attempt
             )
             timeout_s = execution.timeout_s
-            # Fase 1/2: execuções de Workspace preenchem source=WORKSPACE e
-            # notebook_path; até a Fase 2 apenas a origem DB chega aqui.
-            assert execution.notebook_version_id is not None, (
-                "execução sem notebook_version_id (origem WORKSPACE ainda não suportada "
-                "pelo executor)"
-            )
-            version = await service.notebooks.get_version_by_id(
-                execution.notebook_version_id
-            )
-            assert version is not None  # FK garante existência
-            content: dict[str, Any] = version.content
+            source = execution.source
+            workspace_id = execution.workspace_id
+            notebook_path = execution.notebook_path
+            notebook_version_id = execution.notebook_version_id
+            if source == ExecutionSource.WORKSPACE:
+                assert workspace_id is not None and notebook_path is not None, (
+                    "execução WORKSPACE sem workspace_id/notebook_path"
+                )
+                root = Path(self.settings.workspaces_dir) / str(workspace_id)
+                content: dict[str, Any] = _read_workspace_notebook(root, notebook_path)
+                # subprocess sandbox: o filho compartilha o FS do worker, então o
+                # workspace_sdk enxerga esta raiz. No sandbox docker o volume ainda
+                # não é montado no container aninhado (pendente Fase 12).
+                workspace_root: str | None = str(root)
+            else:
+                assert notebook_version_id is not None, (
+                    "execução DB sem notebook_version_id"
+                )
+                version = await service.notebooks.get_version_by_id(notebook_version_id)
+                assert version is not None  # FK garante existência
+                content = version.content
+                workspace_root = None
         await self._publish(
             exec_uuid, make_event("status_changed", status=ExecutionStatus.RUNNING)
         )
-        return content, timeout_s
+        return content, timeout_s, workspace_root
 
     async def _parameters(self, exec_uuid: uuid.UUID) -> dict[str, Any]:
         async with session_scope() as session:
@@ -232,7 +244,9 @@ class ExecutionManager:
         )
         return masked
 
-    async def _build_env(self, pydeps_dir: Path) -> dict[str, str]:
+    async def _build_env(
+        self, pydeps_dir: Path, *, workspace_root: str | None = None
+    ) -> dict[str, str]:
         """Variáveis (visíveis) + secrets (cifrados) + alvo pip → env vars da execução."""
         async with session_scope() as session:
             variables = await VariableService(session).resolve()
@@ -242,6 +256,9 @@ class ExecutionManager:
         merged.update({k: str(v) for k, v in variables.items()})
         merged.update({k: str(v) for k, v in secrets.items()})
         merged.update(self._pip_env(pydeps_dir))
+        if workspace_root:
+            # liga o pacote `workspace_sdk` dentro do notebook (workspace.read_csv(...))
+            merged["WORKSPACE_ROOT"] = workspace_root
         return merged
 
     def _pip_env(self, pydeps_dir: Path) -> dict[str, str]:
@@ -380,6 +397,17 @@ def _ensure_language(content: dict[str, Any]) -> dict[str, Any]:
     meta.setdefault("language_info", {"name": "python"})
     meta.setdefault("kernelspec", {"name": "python3", "display_name": "Python 3"})
     return content
+
+
+def _read_workspace_notebook(root: Path, rel_path: str) -> dict[str, Any]:
+    """Lê e valida um `.ipynb` de dentro de um Workspace (guard de path traversal)."""
+    target = resolve_within(root, rel_path)
+    if not target.is_file():
+        raise FileNotFoundError(f"notebook não encontrado no Workspace: {rel_path}")
+    data = json.loads(target.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"conteúdo .ipynb inválido: {rel_path}")
+    return data
 
 
 def _read_notebook(path: Path) -> dict[str, Any] | None:

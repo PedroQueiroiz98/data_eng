@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nbplatform.domain.enums import ExecutionStatus, LogLevel
+from nbplatform.domain.enums import ExecutionSource, ExecutionStatus, LogLevel
 
 
 class ExecutionCreate(BaseModel):
@@ -20,7 +20,11 @@ class ExecutionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    notebook_version_id: uuid.UUID
+    source: ExecutionSource = ExecutionSource.DB
+    notebook_version_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+    notebook_path: str | None = None
+    source_commit: str | None = None
     status: ExecutionStatus
     attempt: int
     parameters: dict[str, Any]

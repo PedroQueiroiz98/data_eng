@@ -49,6 +49,19 @@ class WorkspaceDetail(WorkspaceRead):
     git_repository: WorkspaceGitSummary | None = None
 
 
+# ── Membros (ACL) ───────────────────────────────────────────────────────────
+class WorkspaceMemberRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: uuid.UUID
+    role: Literal["VIEWER", "EDITOR", "OWNER"]
+    created_at: datetime
+
+
+class WorkspaceMemberUpsert(BaseModel):
+    role: Literal["VIEWER", "EDITOR", "OWNER"]
+
+
 # ── File Explorer ────────────────────────────────────────────────────────────
 class FileNode(BaseModel):
     name: str

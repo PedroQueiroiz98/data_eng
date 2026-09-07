@@ -87,3 +87,23 @@ class GitProvider(StrEnum):
     GITLAB = "GITLAB"
     BITBUCKET = "BITBUCKET"
     AZURE_DEVOPS = "AZURE_DEVOPS"
+
+
+class WorkspaceRole(StrEnum):
+    """Papel de um usuário num Workspace (ACL). Ordem: VIEWER < EDITOR < OWNER.
+
+    VIEWER → lê árvore/arquivos, baixa.
+    EDITOR → + escreve/cria/renomeia/remove/upload, executa.
+    OWNER  → + gerencia membros, edita/exclui o Workspace, conecta Git.
+    """
+
+    VIEWER = "VIEWER"
+    EDITOR = "EDITOR"
+    OWNER = "OWNER"
+
+
+WORKSPACE_ROLE_RANK: dict[WorkspaceRole, int] = {
+    WorkspaceRole.VIEWER: 1,
+    WorkspaceRole.EDITOR: 2,
+    WorkspaceRole.OWNER: 3,
+}
