@@ -1,0 +1,9 @@
+# Normaliza para LF no repositório (Dockerfiles e shell scripts exigem LF).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

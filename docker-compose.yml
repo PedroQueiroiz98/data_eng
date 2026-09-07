@@ -1,0 +1,114 @@
+name: nbplatform
+
+# Todas as variáveis de override usam o prefixo NBP_ para não colidir com
+# variáveis já presentes no shell (POSTGRES_PASSWORD, REDIS_URL, etc.).
+
+x-backend-env: &backend-env
+  APP_ENV: ${NBP_APP_ENV:-dev}
+  LOG_LEVEL: ${NBP_LOG_LEVEL:-INFO}
+  DATABASE_URL: ${NBP_DATABASE_URL:-postgresql+asyncpg://nbplatform:nbplatform@postgres:5432/nbplatform}
+  REDIS_URL: ${NBP_REDIS_URL:-redis://redis:6379/0}
+  SECRET_ENCRYPTION_KEY: ${NBP_SECRET_ENCRYPTION_KEY:-CHANGE_ME_generate_a_real_fernet_key_base64_32bytes=}
+  MAX_CONCURRENT_JOBS: ${NBP_MAX_CONCURRENT_JOBS:-5}
+  MAX_CONCURRENT_EXECUTIONS: ${NBP_MAX_CONCURRENT_EXECUTIONS:-5}
+  EXECUTION_TIMEOUT_S: ${NBP_EXECUTION_TIMEOUT_S:-1800}
+  WORKER_HEARTBEAT_INTERVAL_S: ${NBP_WORKER_HEARTBEAT_INTERVAL_S:-10}
+  WORKER_LEASE_TIMEOUT_S: ${NBP_WORKER_LEASE_TIMEOUT_S:-60}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nbplatform
+      POSTGRES_PASSWORD: nbplatform
+      POSTGRES_DB: nbplatform
+    ports:
+      - "${NBP_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nbplatform -d nbplatform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${NBP_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    command: ["sh", "-c", "alembic upgrade head && python -m nbplatform.api"]
+    environment:
+      <<: *backend-env
+    volumes:
+      - execution_artifacts:/data/executions
+    ports:
+      - "${NBP_BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "nbplatform.scripts.healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  worker:
+    build:
+      context: ./backend
+    command: ["python", "-m", "nbplatform.worker"]
+    environment:
+      <<: *backend-env
+    volumes:
+      - execution_artifacts:/data/executions
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  scheduler:
+    build:
+      context: ./backend
+    command: ["python", "-m", "nbplatform.scheduler"]
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+    command: ["pnpm", "dev", "--host", "0.0.0.0", "--port", "5173"]
+    environment:
+      VITE_API_BASE_URL: ${NBP_VITE_API_BASE_URL:-/api}
+      VITE_WS_BASE_URL: ${NBP_VITE_WS_BASE_URL:-/ws}
+      VITE_BACKEND_ORIGIN: http://backend:8000
+    ports:
+      - "${NBP_FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  pgdata:
+  execution_artifacts:

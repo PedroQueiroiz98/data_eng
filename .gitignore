@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# uv
+uv.lock
+
+# Node
+node_modules/
+frontend/dist/
+*.local
+
+# Env / secrets
+.env
+!.env.example
+
+# Data / runtime artifacts
+data/
+notebooks_store/
+execution_artifacts/
+*.log
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

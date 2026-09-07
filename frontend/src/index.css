@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+}
+
+@layer components {
+  .btn-cell {
+    @apply rounded border border-slate-300 px-1.5 py-0.5 leading-none hover:bg-slate-100 disabled:opacity-30;
+  }
+}

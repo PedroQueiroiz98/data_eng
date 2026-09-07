@@ -1,0 +1,71 @@
+"""Enums do domínio. Fonte única da verdade para status e classificações.
+
+Usados por modelos SQLAlchemy, schemas Pydantic e serviços.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class ExecutionStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    TIMEOUT = "TIMEOUT"
+
+
+class JobStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class JobTaskStatus(StrEnum):
+    PENDING = "PENDING"
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    SKIPPED = "SKIPPED"
+
+
+class WorkflowStatus(StrEnum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+    ARCHIVED = "ARCHIVED"
+
+
+class TaskType(StrEnum):
+    NOTEBOOK = "NOTEBOOK"
+    PYTHON = "PYTHON"
+
+
+class TriggerType(StrEnum):
+    MANUAL = "MANUAL"
+    SCHEDULED = "SCHEDULED"
+    API = "API"
+
+
+class LogLevel(StrEnum):
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+
+
+class ErrorClass(StrEnum):
+    TRANSIENT = "TRANSIENT"
+    PERMANENT = "PERMANENT"
+    UNKNOWN = "UNKNOWN"
+
+
+class RetryMode(StrEnum):
+    ANY = "ANY"
+    TRANSIENT_ONLY = "TRANSIENT_ONLY"
