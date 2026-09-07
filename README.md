@@ -145,6 +145,57 @@ fallback. `idempotency_key` evita execuções duplicadas.
 Config em `.env.example` (`NBP_EXECUTION_MAX_RETRIES`, `NBP_EXECUTION_RETRY_MODE`, delays,
 `NBP_RECOVERY_INTERVAL_S`).
 
+## Workflows (Fase 5)
+
+Um **Workflow** é um DAG de tarefas. Tarefa tipo `NOTEBOOK` (único suportado nesta fase):
+notebook + parâmetros + `timeout_s` + `max_retries` + `retry_policy`. `workflow_dependencies`
+guarda as arestas; o backend valida que o grafo **não tem ciclo** (Kahn, `domain/dag.py`) —
+o front não é a única validação.
+
+| Método | Rota | Descrição |
+| ------ | ---- | --------- |
+| `GET/POST` | `/api/workflows` | lista / cria (DRAFT, vazio) |
+| `GET` | `/api/workflows/{id}` | detalhe com `tasks` + `dependencies` |
+| `PUT` | `/api/workflows/{id}` | metadados (`name`, `description`, `status`) |
+| `DELETE` | `/api/workflows/{id}` | remove |
+| `PUT` | `/api/workflows/{id}/graph` | **substitui** tasks+arestas transacionalmente |
+
+`PUT …/graph` recebe `{tasks:[{key,name,notebook_id,parameters,timeout_s,max_retries,retry_policy,ui_position}], dependencies:[{from_key,to_key}]}`.
+O `key` é o id da task existente (preserva o id) ou um id temporário (cria nova); tasks
+ausentes são removidas. Rejeita (`422`) ciclo, aresta para tarefa fora do grafo, tipo ≠
+`NOTEBOOK` e `notebook_id` inexistente.
+
+**Editor** (`/workflows/:id`): canvas React Flow (`@xyflow/react`) — adicionar/remover nó,
+conectar por arraste, painel lateral (nome, notebook, timeout, retries), salvar, **Executar**.
+
+## Jobs (Fase 6)
+
+Executar um Workflow cria um **Job**. O `JobOrchestrator` cria um `JobTask` por tarefa
+(`PENDING`), enfileira o *ready-set* (tarefas sem dependência) criando uma `Execution` por
+task (com `retry_policy`/`timeout_s` herdados da `workflow_task`), e o **loop de orquestração
+do worker** (`sync_and_advance`, a cada ~2s, `SELECT … FOR UPDATE SKIP LOCKED` na linha do
+Job) avança o DAG:
+
+- Execution da task termina → copia o status para o `JobTask`.
+- Tarefa `PENDING` com todas as dependências `SUCCESS` → cria Execution + enfileira.
+- Dependência `FAILED`/`CANCELLED`/`SKIPPED` → tarefa vira **`SKIPPED`** (propaga).
+- Todas terminais → Job `SUCCESS` (todas ok), senão `FAILED` (ou `CANCELLED`).
+- Tarefas independentes rodam **em paralelo** (limitado por `MAX_CONCURRENT_EXECUTIONS`).
+
+| Método | Rota | Descrição |
+| ------ | ---- | --------- |
+| `POST` | `/api/workflows/{id}/run` | cria e inicia o Job (`202`), body `{parameters}` |
+| `GET`  | `/api/jobs?workflow_id=&status=` | lista |
+| `GET`  | `/api/jobs/{id}` | detalhe: tasks (com `name`, `execution_id`) + dependências |
+| `GET`  | `/api/jobs/{id}/logs?after_seq=` | timeline de orquestração |
+| `POST` | `/api/jobs/{id}/cancel` | idempotente; pendências → CANCELLED, running recebe sinal |
+| `POST` | `/api/jobs/{id}/retry` | Job terminal com falha → re-arma tasks FAILED/SKIPPED/CANCELLED (mantém SUCCESS) |
+| `WS`   | `/ws/jobs/{id}?after_seq=` | snapshot (job + tasks + logs) + eventos |
+
+UI: `/jobs` (lista estilo GitHub Actions, ✓/✕/○ + duração) e `/jobs/:id` (tasks com status +
+link para os logs da Execution + timeline ao vivo por WebSocket). Botão **Executar** no editor
+de workflow leva ao Job.
+
 ## Desenvolvimento
 
 ### Backend
@@ -223,8 +274,8 @@ Todas as variáveis em `.env.example`. Destaques:
 2. **Notebook** ✅ — CRUD, versionamento imutável, editor Monaco, salvar `.ipynb` (nbformat v4).
 3. **Papermill** ✅ — Execution, Worker (fila Redis + subprocesso), output.ipynb, logs, status, WebSocket com replay.
 4. **Resiliência** ✅ — RetryPolicy + classificação de erro, retry auto (backoff + delayed queue) e manual, timeout, cancelamento, recovery de lease expirado, DLQ.
-5. Workflow — CRUD, React Flow, DAG, dependências, paralelismo.
-6. Jobs — histórico, detalhes, JobTasks, logs em tempo real.
+5. **Workflow** ✅ — CRUD, editor React Flow, DAG com detecção de ciclo no backend, save transacional do grafo.
+6. **Jobs** ✅ — `POST /workflows/{id}/run`, orquestrador (ready-set, paralelismo, SKIPPED em cascata), cancel/retry, `/ws/jobs/{id}`, UI GitHub Actions.
 7. Scheduler — cron, ativar/desativar, execução automática.
 8. Segurança — auth/authz, secrets criptografados + masking, isolamento Docker, auditoria.
 9. Observabilidade — métricas Prometheus, logs estruturados, readiness completo.

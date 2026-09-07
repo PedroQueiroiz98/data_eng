@@ -44,6 +44,13 @@ class NotebookRepository:
     async def get_version_by_id(self, version_id: uuid.UUID) -> NotebookVersion | None:
         return await self.session.get(NotebookVersion, version_id)
 
+    async def current_version_id(self, notebook_id: uuid.UUID) -> uuid.UUID | None:
+        notebook = await self.session.get(Notebook, notebook_id)
+        if notebook is None:
+            return None
+        version = await self.get_version(notebook_id, notebook.current_version)
+        return version.id if version else None
+
     async def get_version(
         self, notebook_id: uuid.UUID, version_number: int
     ) -> NotebookVersion | None:

@@ -39,6 +39,9 @@ class Execution(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     attempt: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(200), unique=True)
+    # Overrides opcionais (execução disparada por Job herda da workflow_task).
+    retry_policy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    timeout_s: Mapped[int | None] = mapped_column(Integer)
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

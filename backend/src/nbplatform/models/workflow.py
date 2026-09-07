@@ -50,6 +50,8 @@ class WorkflowTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     timeout_s: Mapped[int | None] = mapped_column(Integer)
     max_retries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     retry_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    # Posição no canvas do editor visual ({"x": ..., "y": ...}).
+    ui_position: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     workflow: Mapped[Workflow] = relationship(back_populates="tasks")
 

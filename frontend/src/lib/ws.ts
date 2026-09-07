@@ -4,6 +4,12 @@ import {
   type ExecutionLog,
   type ExecutionStatus,
 } from "@/lib/executions";
+import {
+  isJobTerminal,
+  type JobLog,
+  type JobStatus,
+  type JobTask,
+} from "@/lib/jobs";
 
 export interface SnapshotEvent {
   type: "snapshot";
@@ -131,6 +137,99 @@ export function openExecutionSocket(
       scheduleReconnect();
     };
 
+    socket.onerror = () => socket?.close();
+  }
+
+  connect();
+  return stop;
+}
+
+// ─── Job socket ──────────────────────────────────────────────────────────────
+
+export interface JobSnapshotEvent {
+  type: "snapshot";
+  job: { id: string; status: JobStatus; workflow_name: string };
+  tasks: JobTask[];
+  logs: JobLog[];
+}
+
+export interface JobSocketHandlers {
+  onSnapshot?: (e: JobSnapshotEvent) => void;
+  onLog?: (e: { seq: number; message: string; job_task_id: string | null }) => void;
+  onStatus?: (status: JobStatus) => void;
+  onProgress?: () => void;
+  onOpen?: () => void;
+  onDisconnect?: () => void;
+}
+
+export function openJobSocket(
+  jobId: string,
+  handlers: JobSocketHandlers,
+  deps: ExecutionSocketDeps = {},
+): () => void {
+  const WS = deps.WebSocketImpl ?? WebSocket;
+  const baseUrl = deps.baseUrl ?? import.meta.env.VITE_WS_BASE_URL ?? "/ws";
+  const maxDelay = deps.maxDelayMs ?? 15_000;
+
+  let socket: WebSocket | null = null;
+  let stopped = false;
+  let lastSeq = 0;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const stop = (): void => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    socket?.close();
+  };
+
+  function connect(): void {
+    if (stopped) return;
+    const url = baseUrl.startsWith("ws")
+      ? `${baseUrl}/jobs/${jobId}?after_seq=${lastSeq}`
+      : `${typeof location !== "undefined" && location.protocol === "https:" ? "wss" : "ws"}://${
+          typeof location !== "undefined" ? location.host : "localhost"
+        }${baseUrl}/jobs/${jobId}?after_seq=${lastSeq}`;
+    socket = new WS(url);
+
+    socket.onopen = () => {
+      attempt = 0;
+      handlers.onOpen?.();
+    };
+    socket.onmessage = (ev: MessageEvent) => {
+      let evt: { type: string; [k: string]: unknown };
+      try {
+        evt = JSON.parse(ev.data as string);
+      } catch {
+        return;
+      }
+      if (evt.type === "snapshot") {
+        const s = evt as unknown as JobSnapshotEvent;
+        for (const l of s.logs) lastSeq = Math.max(lastSeq, l.seq);
+        handlers.onSnapshot?.(s);
+        if (isJobTerminal(s.job.status)) stop();
+      } else if (evt.type === "log") {
+        const seq = Number(evt.seq);
+        lastSeq = Math.max(lastSeq, seq);
+        handlers.onLog?.({
+          seq,
+          message: String(evt.message),
+          job_task_id: (evt.job_task_id as string | null) ?? null,
+        });
+      } else if (evt.type === "status_changed") {
+        const st = String(evt.status) as JobStatus;
+        handlers.onStatus?.(st);
+        if (isJobTerminal(st)) stop();
+      } else if (evt.type === "progress") {
+        handlers.onProgress?.();
+      }
+    };
+    socket.onclose = () => {
+      if (stopped) return;
+      handlers.onDisconnect?.();
+      attempt += 1;
+      timer = setTimeout(connect, Math.min(1000 * 2 ** attempt, maxDelay));
+    };
     socket.onerror = () => socket?.close();
   }
 

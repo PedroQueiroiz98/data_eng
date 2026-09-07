@@ -20,12 +20,14 @@ from nbplatform.core.runtime import heartbeat_loop, install_signal_handlers
 from nbplatform.queue.execution_queue import ExecutionQueue, QueueMessage
 from nbplatform.queue.redis_client import close_redis, get_redis, ping
 from nbplatform.worker.execution_manager import ExecutionManager, cleanup_workdir
+from nbplatform.worker.job_loop import run_job_cycle
 from nbplatform.worker.recovery import recover_stale_executions
 
 logger = logging.getLogger(__name__)
 
 WORKER_ID = f"worker-{uuid.uuid4().hex[:8]}"
 LEASE_POLL_TIMEOUT_S = 2.0
+JOB_CYCLE_INTERVAL_S = 2.0
 
 
 async def _process(message: QueueMessage, redis: Redis, sem: asyncio.Semaphore) -> None:
@@ -97,6 +99,17 @@ async def _recovery_loop(stop: asyncio.Event) -> None:
             logger.exception("erro no loop de recovery")
 
 
+async def _job_loop(stop: asyncio.Event) -> None:
+    redis = get_redis()
+    while not stop.is_set():
+        try:
+            await run_job_cycle(redis)
+        except Exception:
+            logger.exception("erro no loop de orquestração de jobs")
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=JOB_CYCLE_INTERVAL_S)
+
+
 async def _run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, service="worker")
@@ -117,12 +130,13 @@ async def _run() -> None:
 
     hb = asyncio.create_task(heartbeat_loop("worker", stop))
     recovery = asyncio.create_task(_recovery_loop(stop))
+    jobs = asyncio.create_task(_job_loop(stop))
     consumer = asyncio.create_task(_consume_loop(stop))
     try:
-        await asyncio.gather(hb, recovery, consumer)
+        await asyncio.gather(hb, recovery, jobs, consumer)
     finally:
         stop.set()
-        for task in (hb, recovery):
+        for task in (hb, recovery, jobs):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

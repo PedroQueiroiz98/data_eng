@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from nbplatform.api.routes import executions, health, notebooks, ws
+from nbplatform.api.routes import executions, health, jobs, notebooks, workflows, ws
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import DomainError
 from nbplatform.core.logging import configure_logging
@@ -51,6 +51,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(notebooks.router)
     app.include_router(executions.router)
+    app.include_router(workflows.router)
+    app.include_router(jobs.router)
     app.include_router(ws.router)
     return app
 

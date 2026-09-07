@@ -62,6 +62,26 @@ class ExecutionService:
         await self.repo.add(execution)
         return execution, True
 
+    async def create_raw(
+        self,
+        notebook_version_id: uuid.UUID,
+        *,
+        parameters: dict[str, Any],
+        retry_policy: dict[str, Any] | None = None,
+        timeout_s: int | None = None,
+    ) -> Execution:
+        """Cria uma execução para uma versão específica (usado pela orquestração de Jobs)."""
+        execution = Execution(
+            notebook_version_id=notebook_version_id,
+            status=ExecutionStatus.QUEUED,
+            parameters=parameters,
+            attempt=1,
+            retry_policy=retry_policy or None,
+            timeout_s=timeout_s,
+        )
+        await self.repo.add(execution)
+        return execution
+
     async def get(self, execution_id: uuid.UUID) -> Execution:
         execution = await self.repo.get(execution_id)
         if execution is None:

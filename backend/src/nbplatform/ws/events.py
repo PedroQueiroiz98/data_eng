@@ -1,10 +1,10 @@
-"""Eventos de execução via Redis pub/sub (fan-out para WebSockets)."""
+"""Eventos de execução/job via Redis pub/sub (fan-out para WebSockets)."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Literal
 
 from redis.asyncio import Redis
@@ -14,7 +14,7 @@ from nbplatform.core.config import get_settings
 EventType = Literal["status_changed", "log", "output", "progress"]
 
 
-def make_event(event_type: EventType, **data: Any) -> dict[str, Any]:
+def make_event(event_type: str, **data: Any) -> dict[str, Any]:
     return {"type": event_type, **data}
 
 
@@ -25,12 +25,16 @@ async def publish_execution_event(
     await redis.publish(channel, json.dumps(event, default=str))
 
 
+async def publish_job_event(redis: Redis, job_id: str, event: dict[str, Any]) -> None:
+    channel = get_settings().job_event_channel(job_id)
+    await redis.publish(channel, json.dumps(event, default=str))
+
+
 @asynccontextmanager
-async def subscribe_execution_events(
-    redis: Redis, execution_id: str
+async def subscribe_channel(
+    redis: Redis, channel: str
 ) -> AsyncIterator[AsyncIterator[dict[str, Any]]]:
-    """Context manager que entrega um iterador de eventos do canal da execução."""
-    channel = get_settings().exec_event_channel(execution_id)
+    """Entrega um iterador de eventos JSON publicados no canal."""
     pubsub = redis.pubsub()
     await pubsub.subscribe(channel)
 
@@ -48,3 +52,14 @@ async def subscribe_execution_events(
     finally:
         await pubsub.unsubscribe(channel)
         await pubsub.aclose()
+
+
+_Sub = AbstractAsyncContextManager[AsyncIterator[dict[str, Any]]]
+
+
+def subscribe_execution_events(redis: Redis, execution_id: str) -> _Sub:
+    return subscribe_channel(redis, get_settings().exec_event_channel(execution_id))
+
+
+def subscribe_job_events(redis: Redis, job_id: str) -> _Sub:
+    return subscribe_channel(redis, get_settings().job_event_channel(job_id))

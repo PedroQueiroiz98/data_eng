@@ -37,7 +37,9 @@ class RetryCoordinator:
         self.executions = ExecutionService(session)
         self.settings = get_settings()
 
-    def policy(self) -> RetryPolicy:
+    def policy(self, override: dict[str, object] | None = None) -> RetryPolicy:
+        if override:
+            return RetryPolicy.from_dict(override)
         return RetryPolicy.from_dict(self.settings.default_retry_policy_dict())
 
     async def decide_and_apply(
@@ -51,7 +53,7 @@ class RetryCoordinator:
         execution = await self.executions.get(execution_id)
         attempt = execution.attempt
         error_class = classify(error_code, error_message)
-        policy = self.policy()
+        policy = self.policy(execution.retry_policy)
 
         if policy.should_retry(attempt=attempt, error_class=error_class):
             await self.executions.requeue_for_retry(execution_id)

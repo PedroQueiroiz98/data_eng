@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nbplatform.db.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
@@ -36,6 +38,7 @@ class Job(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         default=TriggerType.MANUAL,
         nullable=False,
     )
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

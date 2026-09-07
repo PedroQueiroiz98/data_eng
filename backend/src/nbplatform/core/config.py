@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     redis_exec_seq_prefix: str = "nbp:execseq:"
     redis_exec_event_prefix: str = "nbp:events:execution:"
     redis_cancel_prefix: str = "nbp:cancel:"
+    redis_job_seq_prefix: str = "nbp:jobseq:"
+    redis_job_event_prefix: str = "nbp:events:job:"
+    redis_job_cancel_prefix: str = "nbp:jobcancel:"
 
     def exec_seq_key(self, execution_id: str) -> str:
         return f"{self.redis_exec_seq_prefix}{execution_id}"
@@ -57,6 +60,15 @@ class Settings(BaseSettings):
 
     def cancel_key(self, execution_id: str) -> str:
         return f"{self.redis_cancel_prefix}{execution_id}"
+
+    def job_seq_key(self, job_id: str) -> str:
+        return f"{self.redis_job_seq_prefix}{job_id}"
+
+    def job_event_channel(self, job_id: str) -> str:
+        return f"{self.redis_job_event_prefix}{job_id}"
+
+    def job_cancel_key(self, job_id: str) -> str:
+        return f"{self.redis_job_cancel_prefix}{job_id}"
 
     def default_retry_policy_dict(self) -> dict[str, object]:
         return {

@@ -42,7 +42,7 @@ class ExecutionManager:
         workdir.mkdir(parents=True, exist_ok=True)
 
         try:
-            content = await self._start(exec_uuid, attempt)
+            content, timeout_s = await self._start(exec_uuid, attempt)
         except ConflictError:
             logger.info(
                 "execução não está QUEUED; ignorando", extra={"execution_id": execution_id}
@@ -66,7 +66,7 @@ class ExecutionManager:
                 input_path=str(input_path),
                 output_path=str(output_path),
                 params_path=str(params_path),
-                timeout_s=float(self.settings.execution_timeout_s),
+                timeout_s=float(timeout_s or self.settings.execution_timeout_s),
                 on_line=lambda line: self._emit_log(exec_uuid, attempt, line),
                 cancel_event=cancel_event,
             )
@@ -171,12 +171,15 @@ class ExecutionManager:
         return failed_status
 
     # ── passos ───────────────────────────────────────────────────────────────
-    async def _start(self, exec_uuid: uuid.UUID, attempt: int) -> dict[str, Any]:
+    async def _start(
+        self, exec_uuid: uuid.UUID, attempt: int
+    ) -> tuple[dict[str, Any], int | None]:
         async with session_scope() as session:
             service = ExecutionService(session)
             execution = await service.mark_running(
                 exec_uuid, worker_id=self.worker_id, attempt=attempt
             )
+            timeout_s = execution.timeout_s
             version = await service.notebooks.get_version_by_id(
                 execution.notebook_version_id
             )
@@ -185,7 +188,7 @@ class ExecutionManager:
         await self._publish(
             exec_uuid, make_event("status_changed", status=ExecutionStatus.RUNNING)
         )
-        return content
+        return content, timeout_s
 
     async def _parameters(self, exec_uuid: uuid.UUID) -> dict[str, Any]:
         async with session_scope() as session:
