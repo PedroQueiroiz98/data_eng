@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { StatusBadge } from "@/components/StatusBadge";
+import { useParams } from "react-router-dom";
+import { LogTerminal } from "@/components/LogTerminal";
 import { NotebookOutputView } from "@/components/notebook/NotebookOutputView";
 import {
   useCancelExecution,
@@ -16,9 +16,17 @@ import {
   type ExecutionStatus,
 } from "@/lib/executions";
 import { openExecutionSocket } from "@/lib/ws";
+import { Button, Card, PageHeader, StatusChip, useConfirm, useToast } from "@/ui";
+import { RetryIcon, StopIcon } from "@/ui/icons";
+
+function fmt(iso: string | null | undefined): string {
+  return iso ? new Date(iso).toLocaleString() : "—";
+}
 
 export function ExecutionDetail() {
   const { id = "" } = useParams();
+  const toast = useToast();
+  const confirm = useConfirm();
   const cancel = useCancelExecution(id);
   const retry = useRetryExecution(id);
 
@@ -30,7 +38,6 @@ export function ExecutionDetail() {
   const [reopenNonce, setReopenNonce] = useState(0);
   const seenSeq = useRef<Set<number>>(new Set());
 
-  // fallback REST (caso o WS não conecte); pára o polling quando terminal
   const restEnabled = status == null || !isTerminal(status);
   const { data: rest } = useExecution(id, restEnabled);
   const effectiveStatus = status ?? rest?.status ?? null;
@@ -62,96 +69,133 @@ export function ExecutionDetail() {
     return close;
   }, [id, reopenNonce]);
 
-  const onRetry = async () => {
-    await retry.mutateAsync();
-    setStatus("QUEUED");
-    setErrorMessage(null);
-    setOutputReady(false);
-    setReopenNonce((n) => n + 1); // reabre o WS para acompanhar a nova tentativa
-  };
-
   useEffect(() => {
     if (rest?.has_output) setOutputReady(true);
   }, [rest?.has_output]);
 
   const { data: output } = useExecutionOutput(id, outputReady);
-
   const params = useMemo(() => rest?.parameters ?? {}, [rest?.parameters]);
 
-  return (
-    <div className="mx-auto max-w-4xl">
-      <div className="mb-4 flex items-center gap-3">
-        <Link to="/executions" className="text-sm text-slate-500 hover:underline">
-          ← Executions
-        </Link>
-        <span className="font-mono text-sm text-slate-500">{id.slice(0, 8)}</span>
-        {effectiveStatus && <StatusBadge status={effectiveStatus} />}
-        {rest?.attempt ? (
-          <span className="text-xs text-slate-400">tentativa #{rest.attempt}</span>
-        ) : null}
+  const onCancel = async () => {
+    if (
+      await confirm({
+        title: "Cancelar execução",
+        message: "Deseja cancelar esta execução?",
+        confirmLabel: "Cancelar execução",
+        cancelLabel: "Voltar",
+        danger: true,
+      })
+    ) {
+      cancel.mutate(undefined, {
+        onSuccess: () => toast.success("Cancelamento solicitado"),
+        onError: (e) => toast.error((e as Error).message),
+      });
+    }
+  };
 
-        <div className="ml-auto flex items-center gap-2">
-          {effectiveStatus && canCancel(effectiveStatus) && (
-            <button
-              type="button"
-              onClick={() => cancel.mutate()}
-              disabled={cancel.isPending}
-              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40"
-            >
-              {cancel.isPending ? "Cancelando…" : "Cancelar"}
-            </button>
-          )}
-          {effectiveStatus && canRetry(effectiveStatus) && (
-            <button
-              type="button"
-              onClick={onRetry}
-              disabled={retry.isPending}
-              className="rounded bg-slate-800 px-2 py-1 text-xs text-white disabled:opacity-40"
-            >
-              {retry.isPending ? "Refazendo…" : "Refazer"}
-            </button>
-          )}
-          <span className={`text-xs ${connected ? "text-green-600" : "text-slate-400"}`}>
-            {connected ? "● ao vivo" : "○ reconectando"}
+  const onRetry = async () => {
+    await retry.mutateAsync();
+    toast.success("Reexecução enfileirada");
+    setStatus("QUEUED");
+    setErrorMessage(null);
+    setOutputReady(false);
+    setReopenNonce((n) => n + 1);
+  };
+
+  return (
+    <div>
+      <PageHeader
+        back={{ to: "/executions", label: "Execuções" }}
+        title={
+          <span className="flex items-center gap-3">
+            <span className="font-mono text-lg">{id.slice(0, 8)}</span>
+            {effectiveStatus && <StatusChip status={effectiveStatus} />}
           </span>
-        </div>
+        }
+        subtitle={
+          <span className="flex items-center gap-3 text-xs">
+            {rest?.attempt ? <span>tentativa #{rest.attempt}</span> : null}
+            <span className={connected ? "text-green-600" : "text-slate-400"}>
+              {connected ? "● ao vivo" : "○ reconectando"}
+            </span>
+          </span>
+        }
+        actions={
+          <>
+            {effectiveStatus && canCancel(effectiveStatus) && (
+              <Button
+                variant="outlined"
+                size="sm"
+                icon={<StopIcon className="h-4 w-4" />}
+                loading={cancel.isPending}
+                onClick={onCancel}
+              >
+                Cancelar
+              </Button>
+            )}
+            {effectiveStatus && canRetry(effectiveStatus) && (
+              <Button
+                size="sm"
+                icon={<RetryIcon className="h-4 w-4" />}
+                loading={retry.isPending}
+                onClick={onRetry}
+              >
+                Reexecutar
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <div className="text-xs uppercase tracking-wide text-slate-400">Início</div>
+          <div className="mt-1 text-sm">{fmt(rest?.started_at)}</div>
+        </Card>
+        <Card>
+          <div className="text-xs uppercase tracking-wide text-slate-400">Fim</div>
+          <div className="mt-1 text-sm">{fmt(rest?.finished_at)}</div>
+        </Card>
+        <Card>
+          <div className="text-xs uppercase tracking-wide text-slate-400">Duração</div>
+          <div className="mt-1 text-sm tabular-nums">
+            {rest?.duration_ms != null
+              ? `${(rest.duration_ms / 1000).toFixed(1)}s`
+              : "—"}
+          </div>
+        </Card>
       </div>
 
       {errorMessage && (
-        <pre className="mb-4 overflow-x-auto whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-          {errorMessage}
-        </pre>
+        <Card className="mt-4 border-red-200 bg-red-50">
+          <div className="text-xs font-semibold uppercase tracking-wide text-red-600">Erro</div>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-xs text-red-700">
+            {errorMessage}
+          </pre>
+        </Card>
       )}
 
       {Object.keys(params).length > 0 && (
-        <section className="mb-4">
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <Card className="mt-4">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Parâmetros
-          </h2>
-          <pre className="overflow-x-auto rounded border border-slate-200 bg-slate-50 p-3 text-xs">
+          </div>
+          <pre className="overflow-x-auto rounded bg-surface-variant p-3 text-xs">
             {JSON.stringify(params, null, 2)}
           </pre>
-        </section>
+        </Card>
       )}
 
-      <section className="mb-4">
-        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Logs
-        </h2>
-        <div className="max-h-96 overflow-auto rounded border border-slate-200 bg-slate-900 p-3 font-mono text-xs text-slate-100">
-          {logs.length === 0 && <span className="text-slate-500">sem logs ainda…</span>}
-          {logs.map((l) => (
-            <div key={l.seq} className={l.level === "ERROR" ? "text-red-400" : ""}>
-              <span className="text-slate-500">{l.seq.toString().padStart(3, "0")} </span>
-              {l.message}
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="mt-6">
+        <LogTerminal
+          lines={logs.map((l) => ({ seq: l.seq, level: l.level, message: l.message }))}
+          filename={`execution-${id.slice(0, 8)}.txt`}
+        />
+      </div>
 
       {output && (
-        <section>
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">
             Notebook executado (output.ipynb)
           </h2>
           <NotebookOutputView notebook={output} />

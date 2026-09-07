@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuthContext } from "@/components/AuthProvider";
+import { Button, TextField } from "@/ui";
 
 export function Login() {
   const navigate = useNavigate();
@@ -24,45 +25,36 @@ export function Login() {
     }
   };
 
-  if (!loading && user) {
-    return <Navigate to="/dashboard" replace />;
-  }
+  if (!loading && user) return <Navigate to="/dashboard" replace />;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50">
-      <form
-        onSubmit={submit}
-        className="w-80 space-y-3 rounded border border-slate-200 bg-white p-6 shadow-sm"
-      >
-        <h1 className="text-lg font-semibold text-slate-800">nbplatform</h1>
-        <label className="block text-sm">
-          <span className="text-xs text-slate-500">E-mail</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-xs text-slate-500">Senha</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5"
-          />
-        </label>
+    <div className="flex min-h-screen items-center justify-center bg-surface-variant p-4">
+      <form onSubmit={submit} className="surface w-full max-w-sm space-y-4 p-6 shadow-e2">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded bg-primary text-sm font-bold text-primary-fg">
+            n
+          </span>
+          <span className="text-lg font-semibold text-slate-800">nbplatform</span>
+        </div>
+        <TextField
+          label="E-mail"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoFocus
+        />
+        <TextField
+          label="Senha"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
         {error && <p className="text-xs text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded bg-slate-800 py-1.5 text-sm text-white disabled:opacity-40"
-        >
-          {busy ? "Entrando…" : "Entrar"}
-        </button>
+        <Button type="submit" fullWidth loading={busy}>
+          Entrar
+        </Button>
       </form>
     </div>
   );

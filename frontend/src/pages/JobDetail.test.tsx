@@ -1,9 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JobTaskStatus } from "@/lib/jobs";
 import type { JobSocketHandlers } from "@/lib/ws";
+import { renderWithProviders } from "@/test/utils";
 import { JobDetail } from "@/pages/JobDetail";
 
 let capturedHandlers: JobSocketHandlers | null = null;
@@ -14,25 +13,12 @@ vi.mock("@/lib/ws", () => ({
   },
 }));
 
-function renderAt(id: string) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[`/jobs/${id}`]}>
-        <Routes>
-          <Route path="/jobs/:id" element={<JobDetail />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
   capturedHandlers = null;
 });
 
-const task = (name: string, status: JobTaskStatus, over = {}) => ({
+const task = (name: string, status: JobTaskStatus) => ({
   id: `t-${name}`,
   workflow_task_id: `w-${name}`,
   execution_id: null,
@@ -43,11 +29,10 @@ const task = (name: string, status: JobTaskStatus, over = {}) => ({
   duration_ms: null,
   error_message: null,
   name,
-  ...over,
 });
 
 describe("JobDetail", () => {
-  it("renderiza tarefas e timeline a partir do snapshot do WS", async () => {
+  it("renderiza tarefas e timeline do snapshot do WS", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -67,7 +52,7 @@ describe("JobDetail", () => {
       ),
     );
 
-    renderAt("j1");
+    renderWithProviders(<JobDetail />, { route: "/jobs/j1", path: "/jobs/:id" });
     await waitFor(() => expect(capturedHandlers).not.toBeNull());
 
     capturedHandlers!.onSnapshot?.({

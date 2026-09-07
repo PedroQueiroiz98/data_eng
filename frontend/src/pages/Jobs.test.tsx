@@ -1,19 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/utils";
 import { Jobs } from "@/pages/Jobs";
-
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <Jobs />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -33,9 +21,9 @@ describe("Jobs page", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([job]), { status: 200 }),
     );
-    renderPage();
+    renderWithProviders(<Jobs />);
     await waitFor(() => {
-      expect(screen.getByText("SUCCESS")).toBeInTheDocument();
+      expect(screen.getByText("Success")).toBeInTheDocument();
       expect(screen.getByText("job12345")).toBeInTheDocument();
       expect(screen.getByText(/2m 31s/)).toBeInTheDocument();
     });
@@ -45,9 +33,7 @@ describe("Jobs page", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([]), { status: 200 }),
     );
-    renderPage();
-    await waitFor(() =>
-      expect(screen.getByText(/Nenhum job ainda/)).toBeInTheDocument(),
-    );
+    renderWithProviders(<Jobs />);
+    await waitFor(() => expect(screen.getByText(/Nenhum job ainda/)).toBeInTheDocument());
   });
 });

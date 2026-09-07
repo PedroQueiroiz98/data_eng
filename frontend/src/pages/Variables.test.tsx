@@ -1,16 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/utils";
 import { Variables } from "@/pages/Variables";
-
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <Variables />
-    </QueryClientProvider>,
-  );
-}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -29,7 +20,7 @@ describe("Variables page", () => {
         { status: 200 },
       ),
     );
-    renderPage();
+    renderWithProviders(<Variables />);
     await waitFor(() => {
       expect(screen.getByText("ENVIRONMENT")).toBeInTheDocument();
       expect(screen.getByText("production")).toBeInTheDocument();

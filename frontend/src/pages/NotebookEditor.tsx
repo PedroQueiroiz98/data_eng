@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { CellCard } from "@/components/notebook/CellCard";
 import { useExecuteNotebook } from "@/hooks/useExecutions";
 import { useNotebook, useSaveVersion, useUpdateNotebook } from "@/hooks/useNotebooks";
 import { useNotebookEditor } from "@/store/notebookEditor";
+import { Button, Dialog, PageHeader, TextArea, useToast } from "@/ui";
+import { AddIcon, RunIcon, SaveIcon } from "@/ui/icons";
 
 export function NotebookEditor() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
   const { data: notebook, isLoading, isError } = useNotebook(id);
   const save = useSaveVersion(id);
   const updateMeta = useUpdateNotebook(id);
@@ -28,8 +31,8 @@ export function NotebookEditor() {
     }
   }, [notebook, loadedVersion, load]);
 
-  if (isLoading) return <p className="text-slate-500">Carregando…</p>;
-  if (isError || !notebook) return <p className="text-red-600">Notebook não encontrado.</p>;
+  if (isLoading) return <p className="text-sm text-slate-400">Carregando…</p>;
+  if (isError || !notebook) return <p className="text-sm text-red-600">Notebook não encontrado.</p>;
 
   const onSave = async () => {
     if (name.trim() && name.trim() !== notebook.name) {
@@ -38,6 +41,7 @@ export function NotebookEditor() {
     await save.mutateAsync(toContent());
     markSaved();
     setLoadedVersion(null);
+    toast.success("Notebook salvo");
   };
 
   const onRun = async () => {
@@ -50,73 +54,51 @@ export function NotebookEditor() {
     }
     if (dirty) await onSave();
     const exec = await execute.mutateAsync({ parameters });
+    toast.success("Execução iniciada");
+    setShowRun(false);
     navigate(`/executions/${exec.id}`);
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <div className="mb-4 flex items-center gap-3">
-        <Link to="/notebooks" className="text-sm text-slate-500 hover:underline">
-          ← Notebooks
-        </Link>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="flex-1 rounded border border-slate-300 px-2 py-1 text-lg font-medium"
-        />
-        <span className="text-xs text-slate-400">
-          v{notebook.current_version} · {notebook.version_count} versões
-        </span>
-        {dirty && <span className="text-xs text-amber-600">• não salvo</span>}
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={save.isPending || updateMeta.isPending}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-40"
-        >
-          {save.isPending ? "Salvando…" : "Salvar versão"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowRun((v) => !v)}
-          className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white"
-        >
-          Executar ▾
-        </button>
-      </div>
-
-      {showRun && (
-        <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
-          <label className="mb-1 block text-xs font-medium text-slate-600">
-            Parâmetros (JSON) — injetados via Papermill
-          </label>
-          <textarea
-            value={paramsText}
-            onChange={(e) => {
-              setParamsText(e.target.value);
-              setParamsError(null);
-            }}
-            rows={4}
-            className="w-full rounded border border-slate-300 p-2 font-mono text-xs"
+    <div>
+      <PageHeader
+        back={{ to: "/notebooks", label: "Notebooks" }}
+        title={
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full max-w-md rounded-md border border-transparent bg-transparent px-1 py-0.5 text-2xl font-semibold hover:border-surface-border focus:border-primary focus:bg-surface focus:outline-none"
           />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onRun}
-              disabled={execute.isPending}
-              className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40"
-            >
-              {execute.isPending ? "Enfileirando…" : "Executar notebook"}
-            </button>
-            {paramsError && <span className="text-xs text-red-600">{paramsError}</span>}
-            {execute.isError && (
-              <span className="text-xs text-red-600">
-                {(execute.error as Error).message}
+        }
+        subtitle={
+          <span className="flex items-center gap-2 text-xs">
+            <span>
+              v{notebook.current_version} · {notebook.version_count} versões
+            </span>
+            {dirty && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700">
+                alterações não salvas
               </span>
             )}
-          </div>
-        </div>
-      )}
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="outlined"
+              size="sm"
+              icon={<SaveIcon className="h-4 w-4" />}
+              loading={save.isPending || updateMeta.isPending}
+              onClick={onSave}
+            >
+              Salvar
+            </Button>
+            <Button size="sm" icon={<RunIcon className="h-4 w-4" />} onClick={() => setShowRun(true)}>
+              Executar
+            </Button>
+          </>
+        }
+      />
 
       {save.isError && (
         <p className="mb-3 text-sm text-red-600">
@@ -131,13 +113,57 @@ export function NotebookEditor() {
       </div>
 
       <div className="mt-4 flex gap-2">
-        <button type="button" onClick={() => addCell("code", null)} className="btn-cell text-sm">
-          + Código
-        </button>
-        <button type="button" onClick={() => addCell("markdown", null)} className="btn-cell text-sm">
-          + Markdown
-        </button>
+        <Button
+          variant="tonal"
+          size="sm"
+          icon={<AddIcon className="h-4 w-4" />}
+          onClick={() => addCell("code", null)}
+        >
+          Código
+        </Button>
+        <Button
+          variant="tonal"
+          size="sm"
+          icon={<AddIcon className="h-4 w-4" />}
+          onClick={() => addCell("markdown", null)}
+        >
+          Markdown
+        </Button>
       </div>
+
+      <Dialog
+        open={showRun}
+        onClose={() => setShowRun(false)}
+        title="Executar notebook"
+        footer={
+          <>
+            <Button variant="text" onClick={() => setShowRun(false)}>
+              Cancelar
+            </Button>
+            <Button
+              icon={<RunIcon className="h-4 w-4" />}
+              loading={execute.isPending}
+              onClick={onRun}
+            >
+              Executar
+            </Button>
+          </>
+        }
+      >
+        <TextArea
+          label="Parâmetros (JSON) — injetados via Papermill"
+          rows={5}
+          value={paramsText}
+          onChange={(e) => {
+            setParamsText(e.target.value);
+            setParamsError(null);
+          }}
+          error={
+            paramsError ??
+            (execute.isError ? (execute.error as Error).message : undefined)
+          }
+        />
+      </Dialog>
     </div>
   );
 }

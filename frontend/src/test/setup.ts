@@ -8,3 +8,8 @@ if (!globalThis.ResizeObserver) {
     disconnect(): void {}
   } as unknown as typeof ResizeObserver;
 }
+
+// jsdom não implementa scrollIntoView (usado pelo LogTerminal para auto-scroll).
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

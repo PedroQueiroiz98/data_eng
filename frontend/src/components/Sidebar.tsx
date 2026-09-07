@@ -1,83 +1,155 @@
+import { useEffect, useState, type ComponentType } from "react";
 import { NavLink } from "react-router-dom";
-import { useAuthContext } from "@/components/AuthProvider";
+import { Tooltip } from "@/ui/Tooltip";
+import {
+  CollapseIcon,
+  DashboardIcon,
+  ExpandIcon,
+  HistoryIcon,
+  JobsIcon,
+  NotebookIcon,
+  ScheduleIcon,
+  SecretIcon,
+  VariableIcon,
+  WorkflowIcon,
+} from "@/ui/icons";
 
 interface Item {
   label: string;
   to: string;
+  Icon: ComponentType<{ className?: string }>;
 }
-
 interface Group {
   heading: string | null;
   items: Item[];
 }
 
 const GROUPS: Group[] = [
-  { heading: null, items: [{ label: "Dashboard", to: "/dashboard" }] },
+  { heading: null, items: [{ label: "Dashboard", to: "/dashboard", Icon: DashboardIcon }] },
   {
     heading: "Workspace",
     items: [
-      { label: "Notebooks", to: "/notebooks" },
-      { label: "Workflows", to: "/workflows" },
+      { label: "Notebooks", to: "/notebooks", Icon: NotebookIcon },
+      { label: "Workflows", to: "/workflows", Icon: WorkflowIcon },
     ],
   },
   {
-    heading: "Operations",
+    heading: "Operações",
     items: [
-      { label: "Jobs", to: "/jobs" },
-      { label: "Executions", to: "/executions" },
-      { label: "Schedules", to: "/schedules" },
+      { label: "Jobs", to: "/jobs", Icon: JobsIcon },
+      { label: "Execuções", to: "/executions", Icon: HistoryIcon },
+      { label: "Agendamentos", to: "/schedules", Icon: ScheduleIcon },
     ],
   },
   {
-    heading: "Administration",
+    heading: "Administração",
     items: [
-      { label: "Variables", to: "/variables" },
-      { label: "Secrets", to: "/secrets" },
+      { label: "Variáveis", to: "/variables", Icon: VariableIcon },
+      { label: "Secrets", to: "/secrets", Icon: SecretIcon },
     ],
   },
 ];
 
-export function Sidebar() {
-  const { user, logout } = useAuthContext();
+const STORE_KEY = "nbp.sidebar.collapsed";
+
+interface Props {
+  mobileOpen: boolean;
+  onClose: () => void;
+}
+
+export function Sidebar({ mobileOpen, onClose }: Props) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(STORE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORE_KEY, collapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [collapsed]);
+
+  // colapsado só afeta o rail em md+; no drawer mobile é sempre expandido
+  const labelCls = collapsed ? "md:hidden" : "";
+  const centerCls = collapsed ? "md:justify-center" : "";
 
   return (
-    <nav className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-50 p-4 text-sm">
-      <div className="mb-6 px-2 text-base font-semibold text-slate-800">nbplatform</div>
-      {GROUPS.map((group) => (
-        <div key={group.heading ?? "root"} className="mb-5">
-          {group.heading && (
-            <div className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {group.heading}
+    <>
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+          onClick={onClose}
+          aria-hidden
+        />
+      )}
+
+      <nav
+        className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-surface-border
+          bg-surface transition-[transform,width] md:static md:z-auto md:translate-x-0
+          ${collapsed ? "md:w-16" : "md:w-60"}
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+        aria-label="Navegação principal"
+      >
+        <div className={`flex h-14 shrink-0 items-center gap-2 border-b border-surface-border px-4 ${centerCls}`}>
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-primary text-sm font-bold text-primary-fg">
+            n
+          </span>
+          <span className={`text-base font-semibold text-slate-800 ${labelCls}`}>nbplatform</span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-2 py-3">
+          {GROUPS.map((group) => (
+            <div key={group.heading ?? "root"} className="mb-4">
+              {group.heading && (
+                <div className={`mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 ${labelCls}`}>
+                  {group.heading}
+                </div>
+              )}
+              {group.items.map((item) => (
+                <Tooltip key={item.to} label={item.label} side="right">
+                  <NavLink
+                    to={item.to}
+                    onClick={onClose}
+                    className={({ isActive }) =>
+                      `relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition ${centerCls}
+                       ${
+                         isActive
+                           ? "bg-primary-container font-medium text-primary-on-container"
+                           : "text-slate-600 hover:bg-surface-variant"
+                       }`
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        {isActive && (
+                          <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r bg-primary" />
+                        )}
+                        <item.Icon className="h-5 w-5 shrink-0" />
+                        <span className={`truncate ${labelCls}`}>{item.label}</span>
+                      </>
+                    )}
+                  </NavLink>
+                </Tooltip>
+              ))}
             </div>
-          )}
-          {group.items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `block rounded px-2 py-1.5 ${
-                  isActive
-                    ? "bg-slate-200 font-medium text-slate-900"
-                    : "text-slate-600 hover:bg-slate-100"
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
           ))}
         </div>
-      ))}
-      <div className="mt-auto border-t border-slate-200 px-2 pt-3 text-xs text-slate-500">
-        <div className="truncate">{user?.email}</div>
-        <div className="text-slate-400">{user?.role}</div>
+
         <button
           type="button"
-          onClick={logout}
-          className="mt-1 text-slate-600 hover:underline"
+          onClick={() => setCollapsed((v) => !v)}
+          className="hidden items-center gap-2 border-t border-surface-border px-4 py-2.5 text-xs
+            text-slate-500 hover:bg-surface-variant md:flex"
         >
-          sair
+          {collapsed ? <ExpandIcon className="h-4 w-4" /> : <CollapseIcon className="h-4 w-4" />}
+          <span className={labelCls}>Recolher</span>
         </button>
-      </div>
-    </nav>
+      </nav>
+    </>
   );
 }

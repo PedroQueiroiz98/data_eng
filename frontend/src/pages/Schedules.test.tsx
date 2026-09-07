@@ -1,16 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/utils";
 import { Schedules } from "@/pages/Schedules";
-
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <Schedules />
-    </QueryClientProvider>,
-  );
-}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,34 +18,41 @@ const schedule = {
   created_at: "2026-09-07T00:00:00Z",
 };
 
-describe("Schedules page", () => {
-  it("lista schedules com cron e estado ativo", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes("/workflows")) {
-        return Promise.resolve(
-          new Response(JSON.stringify([{ id: "w1", name: "ETL", status: "ACTIVE" }]), {
-            status: 200,
-          }),
-        );
-      }
-      return Promise.resolve(new Response(JSON.stringify([schedule]), { status: 200 }));
-    });
+function mockApi(schedules: unknown[]) {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.includes("/workflows")) {
+      return Promise.resolve(
+        new Response(JSON.stringify([{ id: "w1", name: "ETL", status: "ACTIVE" }]), {
+          status: 200,
+        }),
+      );
+    }
+    return Promise.resolve(new Response(JSON.stringify(schedules), { status: 200 }));
+  });
+}
 
-    renderPage();
+describe("Schedules page", () => {
+  it("tem alternância Calendário/Lista e mostra o agendamento na lista", async () => {
+    mockApi([schedule]);
+    renderWithProviders(<Schedules />);
+
+    // aba padrão = calendário
+    expect(await screen.findByRole("button", { name: /Calendário/ })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^Lista$/ }));
+
     await waitFor(() => {
-      expect(screen.getByText("*/10 * * * *")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "ativo" })).toBeInTheDocument();
+      expect(screen.getByText("*/10 * * * *", { exact: false })).toBeInTheDocument();
+      expect(screen.getByText(/A cada 10 min/)).toBeInTheDocument();
     });
   });
 
   it("mostra estado vazio", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify([]), { status: 200 }),
-    );
-    renderPage();
+    mockApi([]);
+    renderWithProviders(<Schedules />);
     await waitFor(() =>
-      expect(screen.getByText(/Nenhum schedule ainda/)).toBeInTheDocument(),
+      expect(screen.getByText(/Nenhum agendamento/)).toBeInTheDocument(),
     );
   });
 });

@@ -1,7 +1,20 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiDelete, apiGet, apiPut } from "@/lib/api";
 import { useAuthContext } from "@/components/AuthProvider";
+import { apiDelete, apiGet, apiPut } from "@/lib/api";
+import {
+  Button,
+  Column,
+  DataTable,
+  Dialog,
+  EmptyState,
+  IconButton,
+  PageHeader,
+  TextField,
+  useConfirm,
+  useToast,
+} from "@/ui";
+import { AddIcon, DeleteIcon, SecretIcon } from "@/ui/icons";
 
 interface SecretMeta {
   key: string;
@@ -9,98 +22,159 @@ interface SecretMeta {
   updated_at: string;
 }
 
-const listSecrets = () => apiGet<SecretMeta[]>("/secrets");
-
 export function Secrets() {
   const { user } = useAuthContext();
   const qc = useQueryClient();
-  const { data, isLoading, isError, error } = useQuery({
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["secrets"],
-    queryFn: listSecrets,
+    queryFn: () => apiGet<SecretMeta[]>("/secrets"),
+    enabled: user?.role === "admin",
   });
   const save = useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) =>
       apiPut(`/secrets/${key}`, { value }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["secrets"] }),
+    onSuccess: () => {
+      toast.success("Secret salvo");
+      qc.invalidateQueries({ queryKey: ["secrets"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
   });
   const remove = useMutation({
     mutationFn: (key: string) => apiDelete(`/secrets/${key}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["secrets"] }),
+    onSuccess: () => {
+      toast.success("Secret excluído");
+      qc.invalidateQueries({ queryKey: ["secrets"] });
+    },
   });
 
+  const [dialog, setDialog] = useState(false);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
 
   if (user?.role !== "admin") {
     return (
       <div>
-        <h1 className="text-2xl font-semibold">Secrets</h1>
-        <p className="mt-2 text-slate-500">Acesso restrito a administradores.</p>
+        <PageHeader title="Secrets" />
+        <EmptyState icon={SecretIcon} title="Acesso restrito" description="Apenas administradores." />
       </div>
     );
   }
 
+  const submit = async () => {
+    if (!key.trim() || !value) return;
+    await save.mutateAsync({ key: key.trim(), value });
+    setDialog(false);
+    setKey("");
+    setValue("");
+  };
+
+  const del = async (k: string) => {
+    if (
+      await confirm({
+        title: "Excluir secret",
+        message: `Excluir "${k}"?`,
+        confirmLabel: "Excluir",
+        danger: true,
+      })
+    )
+      remove.mutate(k);
+  };
+
+  const columns: Column<SecretMeta>[] = [
+    {
+      key: "key",
+      header: "Chave",
+      sortValue: (s) => s.key,
+      render: (s) => <span className="font-mono text-slate-800">{s.key}</span>,
+    },
+    {
+      key: "updated",
+      header: "Atualizado",
+      sortValue: (s) => s.updated_at,
+      render: (s) => (
+        <span className="text-slate-500">{new Date(s.updated_at).toLocaleString()}</span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (s) => (
+        <IconButton
+          label="Excluir"
+          size="sm"
+          danger
+          icon={<DeleteIcon className="h-4 w-4" />}
+          onClick={() => void del(s.key)}
+        />
+      ),
+    },
+  ];
+
   return (
     <div>
-      <h1 className="text-2xl font-semibold">Secrets</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        O valor é cifrado em repouso, injetado como env var na execução e mascarado nos logs.
-        Nunca é retornado pela API.
-      </p>
+      <PageHeader
+        title="Secrets"
+        subtitle="Cifrados em repouso, injetados como env var e mascarados nos logs. O valor nunca é retornado."
+        actions={
+          <Button icon={<AddIcon className="h-4 w-4" />} onClick={() => setDialog(true)}>
+            Novo Secret
+          </Button>
+        }
+      />
 
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!key.trim() || !value) return;
-          await save.mutateAsync({ key: key.trim(), value });
-          setKey("");
-          setValue("");
-        }}
-        className="mt-4 flex gap-2 text-sm"
+      {isError ? (
+        <p className="text-sm text-red-600">Falha ao carregar secrets.</p>
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={data}
+          rowKey={(s) => s.key}
+          loading={isLoading}
+          empty={
+            <EmptyState
+              icon={SecretIcon}
+              title="Nenhum secret"
+              description="Cadastre um secret para usá-lo nas execuções."
+            />
+          }
+        />
+      )}
+
+      <Dialog
+        open={dialog}
+        onClose={() => setDialog(false)}
+        title="Novo secret"
+        footer={
+          <>
+            <Button variant="text" onClick={() => setDialog(false)}>
+              Cancelar
+            </Button>
+            <Button loading={save.isPending} disabled={!key.trim() || !value} onClick={submit}>
+              Salvar
+            </Button>
+          </>
+        }
       >
-        <input
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          placeholder="CHAVE"
-          className="w-48 rounded border border-slate-300 px-2 py-1.5 font-mono"
-        />
-        <input
-          type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="valor"
-          className="w-64 rounded border border-slate-300 px-2 py-1.5"
-        />
-        <button
-          type="submit"
-          disabled={save.isPending || !key.trim() || !value}
-          className="rounded bg-slate-800 px-3 py-1.5 text-white disabled:opacity-40"
-        >
-          Salvar
-        </button>
-      </form>
-
-      <section className="mt-6">
-        {isLoading && <p className="text-slate-500">Carregando…</p>}
-        {isError && <p className="text-red-600">{(error as Error).message}</p>}
-        {data && data.length === 0 && <p className="text-slate-500">Nenhum secret.</p>}
-        <ul className="divide-y divide-slate-100 rounded border border-slate-200">
-          {data?.map((s) => (
-            <li key={s.key} className="flex items-center justify-between px-4 py-2 text-sm">
-              <span className="font-mono">{s.key}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm(`Excluir secret ${s.key}?`)) remove.mutate(s.key);
-                }}
-                className="text-xs text-red-600 hover:underline"
-              >
-                excluir
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <div className="space-y-3">
+          <TextField
+            label="Chave"
+            mono
+            value={key}
+            placeholder="API_KEY"
+            onChange={(e) => setKey(e.target.value)}
+          />
+          <TextField
+            label="Valor"
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </div>
+      </Dialog>
     </div>
   );
 }

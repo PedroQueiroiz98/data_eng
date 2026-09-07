@@ -1,8 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/utils";
 import { Notebooks } from "@/pages/Notebooks";
 
 const navigate = vi.fn();
@@ -10,17 +9,6 @@ vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
   return { ...actual, useNavigate: () => navigate };
 });
-
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <Notebooks />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -42,12 +30,12 @@ describe("Notebooks page", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([nb]), { status: 200 }),
     );
-    renderPage();
+    renderWithProviders(<Notebooks />);
     await waitFor(() => expect(screen.getByText("ETL Clientes")).toBeInTheDocument());
     expect(screen.getByText("v3")).toBeInTheDocument();
   });
 
-  it("cria notebook e navega para o editor", async () => {
+  it("cria notebook via dialog e navega para o editor", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
@@ -56,14 +44,15 @@ describe("Notebooks page", () => {
       )
       .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
 
-    renderPage();
+    renderWithProviders(<Notebooks />);
     await waitFor(() => expect(screen.getByText(/Nenhum notebook/)).toBeInTheDocument());
 
-    await userEvent.type(screen.getByPlaceholderText(/Nome do novo/), "Novo");
-    await userEvent.click(screen.getByRole("button", { name: /Novo notebook/ }));
+    await userEvent.click(screen.getAllByRole("button", { name: /Novo Notebook/i })[0]!);
+    await userEvent.type(screen.getByLabelText("Nome"), "Novo");
+    await userEvent.click(screen.getByRole("button", { name: /^Criar$/ }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/notebooks/new1"));
-    const [, createCall] = fetchMock.mock.calls[1]!;
-    expect(createCall?.method).toBe("POST");
+    const createCall = fetchMock.mock.calls.find(([u]) => String(u).endsWith("/notebooks"));
+    expect((createCall?.[1] as RequestInit)?.method).toBe("POST");
   });
 });

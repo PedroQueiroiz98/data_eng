@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchReadiness, type Readiness } from "@/lib/api";
 import { useAuthContext } from "@/components/AuthProvider";
+import { fetchReadiness, type Readiness } from "@/lib/api";
+import { Card, PageHeader } from "@/ui";
+import { LogsIcon } from "@/ui/icons";
 
 export function Settings() {
   const { user } = useAuthContext();
@@ -11,27 +13,44 @@ export function Settings() {
   });
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+    <div>
+      <PageHeader title="Configuração" />
 
-      <section className="mt-5">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Sessão
-        </h2>
-        <p className="text-sm text-slate-700">
-          {user?.name} · {user?.email} · <span className="text-slate-400">{user?.role}</span>
-        </p>
-      </section>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Sessão
+          </h2>
+          <div className="text-sm text-slate-700">{user?.name}</div>
+          <div className="text-sm text-slate-500">{user?.email}</div>
+          <div className="mt-1 text-xs uppercase tracking-wide text-slate-400">{user?.role}</div>
+        </Card>
 
-      <section className="mt-6">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Saúde
+        <Card>
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Observabilidade
+          </h2>
+          <a
+            href="/metrics"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            <LogsIcon className="h-4 w-4" />
+            Métricas Prometheus (/metrics)
+          </a>
+        </Card>
+      </div>
+
+      <Card className="mt-4" padded={false}>
+        <h2 className="border-b border-surface-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Saúde dos serviços
         </h2>
         {data ? (
-          <ul className="divide-y divide-slate-100 rounded border border-slate-200 text-sm">
+          <ul className="divide-y divide-surface-border text-sm">
             {Object.entries(data.checks).map(([name, c]) => (
-              <li key={name} className="flex justify-between px-4 py-2">
-                <span>{name}</span>
+              <li key={name} className="flex justify-between px-4 py-2.5">
+                <span className="capitalize text-slate-600">{name}</span>
                 <span className={c.ok ? "text-green-600" : "text-red-600"}>
                   {c.ok ? "ok" : (c.detail ?? "indisponível")}
                 </span>
@@ -39,21 +58,9 @@ export function Settings() {
             ))}
           </ul>
         ) : (
-          <p className="text-slate-500">Carregando…</p>
+          <p className="px-4 py-6 text-sm text-slate-400">Carregando…</p>
         )}
-      </section>
-
-      <section className="mt-6">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Observabilidade
-        </h2>
-        <p className="text-sm text-slate-600">
-          Métricas Prometheus:{" "}
-          <a href="/metrics" target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">
-            /metrics
-          </a>
-        </p>
-      </section>
+      </Card>
     </div>
   );
 }

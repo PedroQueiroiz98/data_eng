@@ -3,15 +3,38 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
-body {
-  margin: 0;
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    @apply bg-surface-variant text-slate-800 antialiased;
+  }
+  * {
+    scrollbar-width: thin;
+  }
 }
 
 @layer components {
+  /* editor de notebook — botão de célula compacto */
   .btn-cell {
-    @apply rounded border border-slate-300 px-1.5 py-0.5 leading-none hover:bg-slate-100 disabled:opacity-30;
+    @apply inline-flex items-center justify-center rounded border border-surface-border px-1.5 py-0.5
+      text-slate-600 leading-none hover:bg-surface-variant disabled:opacity-30;
+  }
+
+  /* card / superfície elevada */
+  .surface {
+    @apply rounded-lg border border-surface-border bg-surface shadow-e1;
+  }
+
+  /* linha de tabela clicável */
+  .row-link {
+    @apply cursor-pointer transition-colors hover:bg-surface-variant;
   }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   addEdge,
   Background,
@@ -18,6 +18,8 @@ import { useRunWorkflow } from "@/hooks/useJobs";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useSaveGraph, useUpdateWorkflow, useWorkflow } from "@/hooks/useWorkflows";
 import { buildGraphPayload, type WorkflowDetail } from "@/lib/workflows";
+import { Button, IconButton, PageHeader, StatusChip, useToast } from "@/ui";
+import { AddIcon, DeleteIcon, RunIcon, SaveIcon } from "@/ui/icons";
 
 const nodeTypes = { task: TaskNode };
 const newId = (): string =>
@@ -48,6 +50,7 @@ function toFlow(wf: WorkflowDetail): { nodes: Node[]; edges: Edge[] } {
 
 function EditorInner({ id }: { id: string }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const { data: wf, isLoading, isError } = useWorkflow(id);
   const { data: notebooks } = useNotebooks();
   const saveGraph = useSaveGraph(id);
@@ -138,6 +141,7 @@ function EditorInner({ id }: { id: string }) {
     );
     await saveGraph.mutateAsync(payload);
     setLoadedAt(null); // recarrega do servidor (ids reais para novas tasks)
+    toast.success("Workflow salvo");
   };
 
   const selected = useMemo(
@@ -145,62 +149,64 @@ function EditorInner({ id }: { id: string }) {
     [nodes, selectedId],
   );
 
-  if (isLoading) return <p className="text-slate-500">Carregando…</p>;
-  if (isError || !wf) return <p className="text-red-600">Workflow não encontrado.</p>;
+  if (isLoading) return <p className="text-sm text-slate-400">Carregando…</p>;
+  if (isError || !wf) return <p className="text-sm text-red-600">Workflow não encontrado.</p>;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="mb-3 flex items-center gap-3">
-        <Link to="/workflows" className="text-sm text-slate-500 hover:underline">
-          ← Workflows
-        </Link>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="rounded border border-slate-300 px-2 py-1 text-lg font-medium"
-        />
-        <span className="text-xs text-slate-400">{wf.status}</span>
-        <div className="ml-auto flex gap-2">
-          <button type="button" onClick={addTask} className="btn-cell text-sm">
-            + Tarefa
-          </button>
-          <button
-            type="button"
-            onClick={removeSelected}
-            disabled={!selectedId}
-            className="btn-cell text-sm text-red-600"
-          >
-            Remover
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={saveGraph.isPending}
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-40"
-          >
-            {saveGraph.isPending ? "Salvando…" : "Salvar"}
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              const job = await run.mutateAsync({});
-              navigate(`/jobs/${job.id}`);
-            }}
-            disabled={run.isPending || nodes.length === 0}
-            className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40"
-          >
-            {run.isPending ? "Iniciando…" : "Executar"}
-          </button>
-        </div>
-      </div>
+    <div className="flex h-[calc(100vh-9rem)] flex-col">
+      <PageHeader
+        back={{ to: "/workflows", label: "Workflows" }}
+        title={
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full max-w-md rounded-md border border-transparent bg-transparent px-1 py-0.5 text-2xl font-semibold hover:border-surface-border focus:border-primary focus:bg-surface focus:outline-none"
+          />
+        }
+        subtitle={<StatusChip status={wf.status} size="sm" />}
+        actions={
+          <>
+            <IconButton
+              label="Adicionar tarefa"
+              icon={<AddIcon className="h-4 w-4" />}
+              onClick={addTask}
+            />
+            <IconButton
+              label="Remover selecionada"
+              danger
+              icon={<DeleteIcon className="h-4 w-4" />}
+              disabled={!selectedId}
+              onClick={removeSelected}
+            />
+            <Button
+              variant="outlined"
+              size="sm"
+              icon={<SaveIcon className="h-4 w-4" />}
+              loading={saveGraph.isPending}
+              onClick={onSave}
+            >
+              Salvar
+            </Button>
+            <Button
+              size="sm"
+              icon={<RunIcon className="h-4 w-4" />}
+              loading={run.isPending}
+              disabled={nodes.length === 0}
+              onClick={async () => {
+                const job = await run.mutateAsync({});
+                toast.success("Job iniciado");
+                navigate(`/jobs/${job.id}`);
+              }}
+            >
+              Executar
+            </Button>
+          </>
+        }
+      />
 
-      {run.isError && (
-        <p className="mb-2 text-sm text-red-600">{(run.error as Error).message}</p>
-      )}
-
-      {saveGraph.isError && (
+      {(run.isError || saveGraph.isError) && (
         <p className="mb-2 text-sm text-red-600">
-          {(saveGraph.error as Error).message}
+          {((run.error ?? saveGraph.error) as Error).message}
         </p>
       )}
 

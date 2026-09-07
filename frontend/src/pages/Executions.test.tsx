@@ -1,19 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/utils";
 import { Executions } from "@/pages/Executions";
-
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <Executions />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -37,9 +25,9 @@ describe("Executions page", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([exec]), { status: 200 }),
     );
-    renderPage();
+    renderWithProviders(<Executions />);
     await waitFor(() => {
-      expect(screen.getByText("SUCCESS")).toBeInTheDocument();
+      expect(screen.getByText("Success")).toBeInTheDocument();
       expect(screen.getByText("abcdef12")).toBeInTheDocument();
       expect(screen.getByText("3.5s")).toBeInTheDocument();
     });
@@ -49,7 +37,7 @@ describe("Executions page", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([]), { status: 200 }),
     );
-    renderPage();
+    renderWithProviders(<Executions />);
     await waitFor(() =>
       expect(screen.getByText(/Nenhuma execução ainda/)).toBeInTheDocument(),
     );

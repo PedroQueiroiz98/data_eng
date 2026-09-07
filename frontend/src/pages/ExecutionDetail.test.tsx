@@ -1,24 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/utils";
 import { ExecutionDetail } from "@/pages/ExecutionDetail";
 
 vi.mock("@/lib/ws", () => ({ openExecutionSocket: () => () => {} }));
 
-function renderAt(id: string) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[`/executions/${id}`]}>
-        <Routes>
-          <Route path="/executions/:id" element={<ExecutionDetail />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
+afterEach(() => vi.restoreAllMocks());
 
 const execution = (over: Record<string, unknown>) => ({
   id: "e1",
@@ -38,25 +26,23 @@ const execution = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-afterEach(() => vi.restoreAllMocks());
+describe("ExecutionDetail ações", () => {
+  it("mostra Cancelar para execução RUNNING e chama o endpoint após confirmação", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/cancel")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(execution({ status: "CANCELLED" })), { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify(execution({})), { status: 200 }));
+    });
 
-describe("ExecutionDetail actions", () => {
-  it("mostra Cancelar para execução RUNNING e chama o endpoint", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation((input) => {
-        const url = String(input);
-        if (url.endsWith("/cancel")) {
-          return Promise.resolve(
-            new Response(JSON.stringify(execution({ status: "CANCELLED" })), { status: 200 }),
-          );
-        }
-        return Promise.resolve(new Response(JSON.stringify(execution({})), { status: 200 }));
-      });
+    renderWithProviders(<ExecutionDetail />, { route: "/executions/e1", path: "/executions/:id" });
 
-    renderAt("e1");
-    const btn = await screen.findByRole("button", { name: /Cancelar/ });
-    await userEvent.click(btn);
+    await userEvent.click(await screen.findByRole("button", { name: /Cancelar/ }));
+    // dialog de confirmação
+    await userEvent.click(await screen.findByRole("button", { name: /Cancelar execução/ }));
 
     await waitFor(() =>
       expect(
@@ -65,15 +51,15 @@ describe("ExecutionDetail actions", () => {
     );
   });
 
-  it("mostra Refazer para execução FAILED", async () => {
+  it("mostra Reexecutar para execução FAILED", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify(execution({ status: "FAILED", error_code: "NOTEBOOK_ERROR" })),
         { status: 200 },
       ),
     );
-    renderAt("e1");
-    expect(await screen.findByRole("button", { name: /Refazer/ })).toBeInTheDocument();
+    renderWithProviders(<ExecutionDetail />, { route: "/executions/e1", path: "/executions/:id" });
+    expect(await screen.findByRole("button", { name: /Reexecutar/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Cancelar/ })).not.toBeInTheDocument();
   });
 });

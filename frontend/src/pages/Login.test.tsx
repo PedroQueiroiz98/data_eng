@@ -1,8 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider } from "@/components/AuthProvider";
+import { renderWithProviders } from "@/test/utils";
 import { Login } from "@/pages/Login";
 
 const navigate = vi.fn();
@@ -34,13 +33,7 @@ describe("Login", () => {
       ),
     );
 
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <Login />
-        </AuthProvider>
-      </MemoryRouter>,
-    );
+    renderWithProviders(<Login />, { withAuth: true });
 
     await userEvent.type(screen.getByLabelText(/E-mail/), "admin@x.com");
     await userEvent.type(screen.getByLabelText(/Senha/), "secret");
@@ -56,14 +49,7 @@ describe("Login", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: { code: "unauthorized" } }), { status: 401 }),
     );
-
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <Login />
-        </AuthProvider>
-      </MemoryRouter>,
-    );
+    renderWithProviders(<Login />, { withAuth: true });
     await userEvent.type(screen.getByLabelText(/E-mail/), "a@b.com");
     await userEvent.type(screen.getByLabelText(/Senha/), "x");
     await userEvent.click(screen.getByRole("button", { name: /Entrar/ }));
