@@ -57,4 +57,8 @@ export {
   GitBranch as BranchIcon,
   User as UserIcon,
   Clock as ClockIcon,
+  Bell as BellIcon,
+  Mail as MailIcon,
+  MessageSquare as ChatIcon,
+  Send as SendIcon,
 } from "lucide-react";

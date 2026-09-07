@@ -13,6 +13,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { NotificationConfigDialog } from "@/components/notifications/NotificationConfigDialog";
 import { TaskNode, type TaskNodeData } from "@/components/workflow/TaskNode";
 import { useTheme } from "@/components/ThemeProvider";
 import { useRunWorkflow } from "@/hooks/useJobs";
@@ -20,7 +21,7 @@ import { useNotebooks } from "@/hooks/useNotebooks";
 import { useSaveGraph, useUpdateWorkflow, useWorkflow } from "@/hooks/useWorkflows";
 import { buildGraphPayload, type WorkflowDetail } from "@/lib/workflows";
 import { Button, IconButton, PageHeader, StatusChip, useToast } from "@/ui";
-import { AddIcon, DeleteIcon, RunIcon, SaveIcon } from "@/ui/icons";
+import { AddIcon, BellIcon, DeleteIcon, RunIcon, SaveIcon } from "@/ui/icons";
 
 const nodeTypes = { task: TaskNode };
 const newId = (): string =>
@@ -64,6 +65,7 @@ function EditorInner({ id }: { id: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [showNotif, setShowNotif] = useState(false);
 
   const notebookName = useCallback(
     (nid: string | null) => notebooks?.find((n) => n.id === nid)?.name ?? null,
@@ -180,6 +182,11 @@ function EditorInner({ id }: { id: string }) {
               disabled={!selectedId}
               onClick={removeSelected}
             />
+            <IconButton
+              label="Notificações do pipeline"
+              icon={<BellIcon className="h-4 w-4" />}
+              onClick={() => setShowNotif(true)}
+            />
             <Button
               variant="outlined"
               size="sm"
@@ -294,6 +301,13 @@ function EditorInner({ id }: { id: string }) {
           )}
         </aside>
       </div>
+
+      <NotificationConfigDialog
+        workflowId={id}
+        workflowName={wf.name}
+        open={showNotif}
+        onClose={() => setShowNotif(false)}
+      />
     </div>
   );
 }

@@ -22,6 +22,7 @@ from nbplatform.domain.enums import (
     TriggerType,
 )
 from nbplatform.domain.job_state import JOBTASK_BLOCKING_FAILURE, JOBTASK_TERMINAL
+from nbplatform.domain.notifications import NotificationEvent
 from nbplatform.models.job import Job, JobLog, JobTask
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.repositories.execution_repository import ExecutionRepository
@@ -218,7 +219,23 @@ class JobOrchestrator:
             await self._publish(
                 job_id, make_event("status_changed", status=final_status)
             )
+            await self._notify_final(job_id, final_status)
         return final_status
+
+    async def _notify_final(self, job_id: uuid.UUID, status: JobStatus) -> None:
+        """Dispara o NotificationService no ponto central de falha (spec §19)."""
+        if status != JobStatus.FAILED:
+            return
+        try:
+            from nbplatform.services.notifications import NotificationService
+
+            await NotificationService(self.redis).enqueue_job_event(
+                job_id, NotificationEvent.JOB_FAILED
+            )
+        except Exception:  # noqa: BLE001 - notificação nunca altera o resultado do Job
+            logger.exception(
+                "falha ao acionar notificações", extra={"job_id": str(job_id)}
+            )
 
     # ── helpers ────────────────────────────────────────────────────────────
     async def _launch_task(

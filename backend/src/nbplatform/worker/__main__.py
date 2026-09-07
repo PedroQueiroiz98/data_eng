@@ -21,6 +21,7 @@ from nbplatform.queue.execution_queue import ExecutionQueue, QueueMessage
 from nbplatform.queue.redis_client import close_redis, get_redis, ping
 from nbplatform.worker.execution_manager import ExecutionManager, cleanup_workdir
 from nbplatform.worker.job_loop import run_job_cycle
+from nbplatform.worker.notification_loop import run_notification_loop
 from nbplatform.worker.recovery import recover_stale_executions
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,13 @@ async def _job_loop(stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=JOB_CYCLE_INTERVAL_S)
 
 
+async def _notification_loop(stop: asyncio.Event) -> None:
+    try:
+        await run_notification_loop(stop, get_redis())
+    except Exception:
+        logger.exception("loop de notificações encerrou com erro")
+
+
 async def _run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, service="worker")
@@ -131,12 +139,13 @@ async def _run() -> None:
     hb = asyncio.create_task(heartbeat_loop("worker", stop))
     recovery = asyncio.create_task(_recovery_loop(stop))
     jobs = asyncio.create_task(_job_loop(stop))
+    notifications = asyncio.create_task(_notification_loop(stop))
     consumer = asyncio.create_task(_consume_loop(stop))
     try:
-        await asyncio.gather(hb, recovery, jobs, consumer)
+        await asyncio.gather(hb, recovery, jobs, notifications, consumer)
     finally:
         stop.set()
-        for task in (hb, recovery, jobs):
+        for task in (hb, recovery, jobs, notifications):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

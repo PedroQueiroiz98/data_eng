@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { LogTerminal } from "@/components/LogTerminal";
 import { JobSummary } from "@/components/jobs/JobSummary";
+import { NotificationsPanel } from "@/components/jobs/NotificationsPanel";
 import { PipelineGraph } from "@/components/jobs/PipelineGraph";
 import { RunHistory } from "@/components/jobs/RunHistory";
 import { TaskDetailPanel } from "@/components/jobs/TaskDetailPanel";
@@ -172,6 +173,7 @@ export function JobDetail() {
   const tabs = [
     { id: "logs", label: "Logs" },
     { id: "params", label: "Parâmetros", badge: Object.keys(parameters).length || undefined },
+    { id: "notifications", label: "Notificações" },
     { id: "history", label: "Histórico" },
   ];
 
@@ -330,6 +332,11 @@ export function JobDetail() {
               <p className="mt-3 text-xs text-fg-faint">
                 Valores de chaves sensíveis (senha, token, secret…) são mascarados.
               </p>
+            </Card>
+          )}
+          {tab === "notifications" && (
+            <Card>
+              <NotificationsPanel jobId={id} />
             </Card>
           )}
           {tab === "history" && (

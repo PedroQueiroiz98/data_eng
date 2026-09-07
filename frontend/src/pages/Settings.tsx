@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuthContext } from "@/components/AuthProvider";
+import { NotificationSettingsCard } from "@/components/notifications/NotificationSettingsCard";
 import { fetchReadiness, type Readiness } from "@/lib/api";
 import { useEditorConfig } from "@/lib/editorConfig";
 import { Card, PageHeader, Switch } from "@/ui";
@@ -114,6 +115,8 @@ export function Settings() {
           <p className="px-4 py-6 text-sm text-fg-faint">Carregando…</p>
         )}
       </Card>
+
+      {user?.role === "admin" && <NotificationSettingsCard />}
     </div>
   );
 }

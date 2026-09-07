@@ -20,6 +20,7 @@ from nbplatform.api.routes import (
     lsp,
     metrics,
     notebooks,
+    notifications,
     schedules,
     secrets,
     variables,
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
         secrets,
         audit,
         lsp,
+        notifications,
     ):
         app.include_router(module.router, dependencies=protected)
 

@@ -51,6 +51,32 @@ class Settings(BaseSettings):
     lsp_max_source_chars: int = 200_000
     lsp_max_completions: int = 100
 
+    # ─── Notificações ───
+    # URL pública da aplicação (para o link "View Execution" nas notificações).
+    app_base_url: str = "http://localhost:5173"
+    notification_max_attempts: int = 3
+    notification_retry_initial_delay_s: float = 5.0
+    notification_retry_backoff_multiplier: float = 3.0
+    notification_retry_max_delay_s: float = 300.0
+    notification_send_timeout_s: float = 20.0
+    # Fallbacks de infraestrutura (usados quando o NotificationSettings do banco
+    # não preenche o campo). Secrets NUNCA voltam para o frontend.
+    notify_smtp_host: str = ""
+    notify_smtp_port: int = 587
+    notify_smtp_username: str = ""
+    notify_smtp_password: str = ""
+    notify_smtp_from: str = ""
+    notify_smtp_use_tls: bool = True
+    notify_bitrix_url: str = ""
+    notify_bitrix_send_message_path: str = "/rest/imbot.message.add"
+    notify_bitrix_bot_id: str = ""
+    notify_bitrix_bot_token: str = ""
+
+    redis_queue_notifications: str = "nbp:queue:notifications"
+    redis_queue_notifications_processing: str = "nbp:queue:notifications:processing"
+    redis_queue_notifications_delayed: str = "nbp:queue:notifications:delayed"
+    redis_notification_seq: str = "nbp:notifseq"
+
     max_concurrent_jobs: int = 5
     max_concurrent_executions: int = 5
 
