@@ -4,18 +4,26 @@ import { describe, expect, it } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
 
 describe("Sidebar", () => {
-  it("renderiza os grupos de navegação com ícones", () => {
+  it("renderiza os itens de navegação como lista única", () => {
     render(
       <MemoryRouter>
         <Sidebar mobileOpen={false} onClose={() => {}} />
       </MemoryRouter>,
     );
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
-    expect(screen.getByText("Operações")).toBeInTheDocument();
-    expect(screen.getByText("Administração")).toBeInTheDocument();
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
-    expect(screen.getByText("Agendamentos")).toBeInTheDocument();
-    expect(screen.getByText("Secrets")).toBeInTheDocument();
+    for (const label of [
+      "Dashboard",
+      "Notebooks",
+      "Workflows",
+      "Jobs",
+      "Execuções",
+      "Agendamentos",
+      "Variáveis",
+      "Secrets",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    // sem cabeçalhos de grupo
+    expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("Administração")).not.toBeInTheDocument();
   });
 });

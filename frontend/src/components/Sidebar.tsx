@@ -19,35 +19,16 @@ interface Item {
   to: string;
   Icon: ComponentType<{ className?: string }>;
 }
-interface Group {
-  heading: string | null;
-  items: Item[];
-}
 
-const GROUPS: Group[] = [
-  { heading: null, items: [{ label: "Dashboard", to: "/dashboard", Icon: DashboardIcon }] },
-  {
-    heading: "Workspace",
-    items: [
-      { label: "Notebooks", to: "/notebooks", Icon: NotebookIcon },
-      { label: "Workflows", to: "/workflows", Icon: WorkflowIcon },
-    ],
-  },
-  {
-    heading: "Operações",
-    items: [
-      { label: "Jobs", to: "/jobs", Icon: JobsIcon },
-      { label: "Execuções", to: "/executions", Icon: HistoryIcon },
-      { label: "Agendamentos", to: "/schedules", Icon: ScheduleIcon },
-    ],
-  },
-  {
-    heading: "Administração",
-    items: [
-      { label: "Variáveis", to: "/variables", Icon: VariableIcon },
-      { label: "Secrets", to: "/secrets", Icon: SecretIcon },
-    ],
-  },
+const ITEMS: Item[] = [
+  { label: "Dashboard", to: "/dashboard", Icon: DashboardIcon },
+  { label: "Notebooks", to: "/notebooks", Icon: NotebookIcon },
+  { label: "Workflows", to: "/workflows", Icon: WorkflowIcon },
+  { label: "Jobs", to: "/jobs", Icon: JobsIcon },
+  { label: "Execuções", to: "/executions", Icon: HistoryIcon },
+  { label: "Agendamentos", to: "/schedules", Icon: ScheduleIcon },
+  { label: "Variáveis", to: "/variables", Icon: VariableIcon },
+  { label: "Secrets", to: "/secrets", Icon: SecretIcon },
 ];
 
 const STORE_KEY = "nbp.sidebar.collapsed";
@@ -102,41 +83,32 @@ export function Sidebar({ mobileOpen, onClose }: Props) {
           <span className={`text-base font-semibold text-fg ${labelCls}`}>nbplatform</span>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-2 py-3">
-          {GROUPS.map((group) => (
-            <div key={group.heading ?? "root"} className="mb-4">
-              {group.heading && (
-                <div className={`mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-fg-faint ${labelCls}`}>
-                  {group.heading}
-                </div>
-              )}
-              {group.items.map((item) => (
-                <Tooltip key={item.to} label={item.label} side="right">
-                  <NavLink
-                    to={item.to}
-                    onClick={onClose}
-                    className={({ isActive }) =>
-                      `relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition ${centerCls}
-                       ${
-                         isActive
-                           ? "bg-primary-container font-medium text-primary-on-container"
-                           : "text-fg-muted hover:bg-surface-variant"
-                       }`
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        {isActive && (
-                          <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r bg-primary" />
-                        )}
-                        <item.Icon className="h-5 w-5 shrink-0" />
-                        <span className={`truncate ${labelCls}`}>{item.label}</span>
-                      </>
+        <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-3">
+          {ITEMS.map((item) => (
+            <Tooltip key={item.to} label={item.label} side="right">
+              <NavLink
+                to={item.to}
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition ${centerCls}
+                   ${
+                     isActive
+                       ? "bg-primary-container font-medium text-primary-on-container"
+                       : "text-fg-muted hover:bg-surface-variant"
+                   }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    {isActive && (
+                      <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r bg-primary" />
                     )}
-                  </NavLink>
-                </Tooltip>
-              ))}
-            </div>
+                    <item.Icon className="h-5 w-5 shrink-0" />
+                    <span className={`truncate ${labelCls}`}>{item.label}</span>
+                  </>
+                )}
+              </NavLink>
+            </Tooltip>
           ))}
         </div>
 
