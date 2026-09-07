@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     execution_pip_index_url: str = ""
     execution_pip_max_packages: int = 50
 
+    # ─── Inteligência do editor (LSP via Jedi) ───
+    lsp_enabled: bool = True
+    # Interpretador cujo site-packages o Jedi enxerga (default: o próprio, que
+    # roda a mesma imagem do worker/kernel). "" => usa sys.executable.
+    lsp_environment_path: str = ""
+    lsp_timeout_s: float = 6.0
+    lsp_max_source_chars: int = 200_000
+    lsp_max_completions: int = 100
+
     max_concurrent_jobs: int = 5
     max_concurrent_executions: int = 5
 

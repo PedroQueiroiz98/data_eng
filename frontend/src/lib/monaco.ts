@@ -3,6 +3,7 @@ import { loader } from "@monaco-editor/react";
 import type { Environment } from "monaco-editor";
 import * as monaco from "monaco-editor";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import { registerPythonIntelligence } from "@/lib/monacoProviders";
 
 declare global {
   interface Window {
@@ -15,5 +16,6 @@ window.MonacoEnvironment = {
 };
 
 loader.config({ monaco });
+registerPythonIntelligence();
 
 export {};

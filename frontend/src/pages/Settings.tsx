@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuthContext } from "@/components/AuthProvider";
 import { fetchReadiness, type Readiness } from "@/lib/api";
-import { Card, PageHeader } from "@/ui";
+import { useEditorConfig } from "@/lib/editorConfig";
+import { Card, PageHeader, Switch } from "@/ui";
 import { LogsIcon } from "@/ui/icons";
 
 export function Settings() {
   const { user } = useAuthContext();
+  const { config, setSection, reset } = useEditorConfig();
   const { data } = useQuery<Readiness>({
     queryKey: ["readiness"],
     queryFn: fetchReadiness,
@@ -41,6 +43,57 @@ export function Settings() {
           </a>
         </Card>
       </div>
+
+      <Card className="mt-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-fg-faint">
+            Editor inteligente
+          </h2>
+          <button
+            type="button"
+            onClick={reset}
+            className="text-xs text-primary hover:underline"
+          >
+            restaurar padrões
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Switch
+            checked={config.editor.autocomplete}
+            onChange={(v) => setSection("editor", { autocomplete: v })}
+            label="Autocomplete"
+          />
+          <Switch
+            checked={config.editor.diagnostics}
+            onChange={(v) => setSection("editor", { diagnostics: v })}
+            label="Diagnósticos em tempo real"
+          />
+          <Switch
+            checked={config.editor.signatureHelp}
+            onChange={(v) => setSection("editor", { signatureHelp: v })}
+            label="Ajuda de assinatura"
+          />
+          <Switch
+            checked={config.editor.hover}
+            onChange={(v) => setSection("editor", { hover: v })}
+            label="Documentação ao passar o mouse"
+          />
+          <Switch
+            checked={config.editor.inlineSuggestions}
+            onChange={(v) => setSection("editor", { inlineSuggestions: v })}
+            label="Sugestões inline (IA) — em breve"
+          />
+          <Switch
+            checked={config.ai.enabled}
+            onChange={(v) => setSection("ai", { enabled: v })}
+            label="Assistente de IA — em breve"
+          />
+        </div>
+        <p className="mt-3 text-xs text-fg-faint">
+          Language server: <span className="font-mono">{config.python.languageServer}</span>. Se o
+          serviço cair, o editor e a execução via Papermill continuam funcionando.
+        </p>
+      </Card>
 
       <Card className="mt-4" padded={false}>
         <h2 className="border-b border-surface-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-fg-faint">

@@ -18,6 +18,8 @@ dependencies = [
     "papermill>=2.6",
     "ipykernel>=6.29",
     "pyjwt>=2.9",
+    "jedi>=0.19",
+    "pyflakes>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -58,7 +60,15 @@ disallow_untyped_decorators = false
 warn_return_any = false
 
 [[tool.mypy.overrides]]
-module = ["apscheduler.*", "nbformat.*", "papermill.*"]
+module = [
+    "apscheduler.*",
+    "nbformat.*",
+    "papermill.*",
+    "jedi",
+    "jedi.*",
+    "pyflakes",
+    "pyflakes.*",
+]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -68,6 +78,11 @@ module = [
     "nbplatform.domain.notebook_format",
     "nbplatform.worker.papermill_runner",
     "nbplatform.ws.events",
+    "nbplatform.services.lsp.jedi_backend",
+    "nbplatform.services.lsp.diagnostics",
+    "nbplatform.services.lsp.autoimport",
+    "nbplatform.services.lsp.service",
+    "nbplatform.api.routes.lsp",
 ]
 disallow_untyped_calls = false
 
