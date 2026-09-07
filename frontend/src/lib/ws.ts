@@ -10,6 +10,12 @@ import {
   type JobStatus,
   type JobTask,
 } from "@/lib/jobs";
+import { getAuthToken } from "@/lib/api";
+
+const tokenParam = (): string => {
+  const t = getAuthToken();
+  return t ? `&token=${encodeURIComponent(t)}` : "";
+};
 
 export interface SnapshotEvent {
   type: "snapshot";
@@ -56,12 +62,12 @@ export interface ExecutionSocketDeps {
 
 function wsUrl(executionId: string, afterSeq: number, baseUrl: string): string {
   if (baseUrl.startsWith("ws://") || baseUrl.startsWith("wss://")) {
-    return `${baseUrl}/executions/${executionId}?after_seq=${afterSeq}`;
+    return `${baseUrl}/executions/${executionId}?after_seq=${afterSeq}${tokenParam()}`;
   }
   const proto =
     typeof location !== "undefined" && location.protocol === "https:" ? "wss" : "ws";
   const host = typeof location !== "undefined" ? location.host : "localhost";
-  return `${proto}://${host}${baseUrl}/executions/${executionId}?after_seq=${afterSeq}`;
+  return `${proto}://${host}${baseUrl}/executions/${executionId}?after_seq=${afterSeq}${tokenParam()}`;
 }
 
 /**
@@ -186,10 +192,10 @@ export function openJobSocket(
   function connect(): void {
     if (stopped) return;
     const url = baseUrl.startsWith("ws")
-      ? `${baseUrl}/jobs/${jobId}?after_seq=${lastSeq}`
+      ? `${baseUrl}/jobs/${jobId}?after_seq=${lastSeq}${tokenParam()}`
       : `${typeof location !== "undefined" && location.protocol === "https:" ? "wss" : "ws"}://${
           typeof location !== "undefined" ? location.host : "localhost"
-        }${baseUrl}/jobs/${jobId}?after_seq=${lastSeq}`;
+        }${baseUrl}/jobs/${jobId}?after_seq=${lastSeq}${tokenParam()}`;
     socket = new WS(url);
 
     socket.onopen = () => {

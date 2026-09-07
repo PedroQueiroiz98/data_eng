@@ -25,9 +25,28 @@ _TERMINAL_EXEC = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
 _TERMINAL_JOB = {"SUCCESS", "FAILED", "CANCELLED"}
 
 
+def _authenticated(websocket: WebSocket) -> bool:
+    """Auth de WebSocket via ?token=<jwt> (Bearer não é prático no handshake)."""
+    import jwt
+
+    from nbplatform.core.security import decode_access_token
+
+    token = websocket.query_params.get("token")
+    if not token:
+        return False
+    try:
+        decode_access_token(token)
+    except jwt.PyJWTError:
+        return False
+    return True
+
+
 @router.websocket("/ws/executions/{execution_id}")
 async def execution_ws(websocket: WebSocket, execution_id: str) -> None:
     await websocket.accept()
+    if not _authenticated(websocket):
+        await websocket.close(code=1008)
+        return
     try:
         exec_uuid = uuid.UUID(execution_id)
     except ValueError:
@@ -65,6 +84,9 @@ async def execution_ws(websocket: WebSocket, execution_id: str) -> None:
 @router.websocket("/ws/jobs/{job_id}")
 async def job_ws(websocket: WebSocket, job_id: str) -> None:
     await websocket.accept()
+    if not _authenticated(websocket):
+        await websocket.close(code=1008)
+        return
     try:
         job_uuid = uuid.UUID(job_id)
     except ValueError:

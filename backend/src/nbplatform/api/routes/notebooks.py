@@ -16,6 +16,7 @@ from nbplatform.schemas.notebook import (
     NotebookVersionDetail,
     NotebookVersionRead,
 )
+from nbplatform.services.audit_service import AuditService
 from nbplatform.services.notebook_service import NotebookService
 
 router = APIRouter(prefix="/api/notebooks", tags=["notebooks"])
@@ -51,6 +52,13 @@ async def create_notebook(
         created_by=user_id,
     )
     await session.flush()
+    await AuditService(session).record(
+        user_id=user_id,
+        action="CREATE_NOTEBOOK",
+        resource_type="notebook",
+        resource_id=str(notebook.id),
+        metadata={"name": notebook.name},
+    )
     return await _detail(service, notebook.id)
 
 
@@ -61,18 +69,35 @@ async def get_notebook(notebook_id: uuid.UUID, session: SessionDep) -> NotebookD
 
 @router.put("/{notebook_id}", response_model=NotebookDetail)
 async def update_notebook(
-    notebook_id: uuid.UUID, payload: NotebookUpdate, session: SessionDep
+    notebook_id: uuid.UUID,
+    payload: NotebookUpdate,
+    session: SessionDep,
+    user_id: CurrentUserId,
 ) -> NotebookDetail:
     service = NotebookService(session)
     await service.update_metadata(
         notebook_id, name=payload.name, description=payload.description
     )
+    await AuditService(session).record(
+        user_id=user_id,
+        action="UPDATE_NOTEBOOK",
+        resource_type="notebook",
+        resource_id=str(notebook_id),
+    )
     return await _detail(service, notebook_id)
 
 
 @router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_notebook(notebook_id: uuid.UUID, session: SessionDep) -> None:
+async def delete_notebook(
+    notebook_id: uuid.UUID, session: SessionDep, user_id: CurrentUserId
+) -> None:
     await NotebookService(session).delete(notebook_id)
+    await AuditService(session).record(
+        user_id=user_id,
+        action="DELETE_NOTEBOOK",
+        resource_type="notebook",
+        resource_id=str(notebook_id),
+    )
 
 
 @router.post(

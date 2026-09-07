@@ -1,4 +1,4 @@
-"""Seed idempotente. Fase 1: garante o usuário `dev` usado enquanto não há auth."""
+"""Seed idempotente: garante o usuário admin (credenciais vêm do ambiente)."""
 
 from __future__ import annotations
 
@@ -6,19 +6,32 @@ import logging
 
 from sqlalchemy import select
 
+from nbplatform.core.config import get_settings
+from nbplatform.core.security import hash_password
 from nbplatform.db.session import session_scope
 from nbplatform.models.user import User
 
 logger = logging.getLogger(__name__)
 
-DEV_USER_EMAIL = "dev@nbplatform.local"
 
-
-async def ensure_dev_user() -> None:
+async def ensure_admin_user() -> None:
+    settings = get_settings()
+    email = settings.admin_email.lower().strip()
     async with session_scope() as session:
-        existing = await session.scalar(select(User).where(User.email == DEV_USER_EMAIL))
+        existing = await session.scalar(select(User).where(User.email == email))
         if existing is None:
-            session.add(User(email=DEV_USER_EMAIL, name="Dev User"))
-            logger.info("seed: usuário dev criado", extra={"email": DEV_USER_EMAIL})
+            session.add(
+                User(
+                    email=email,
+                    name="Administrador",
+                    role="admin",
+                    password_hash=hash_password(settings.admin_password),
+                )
+            )
+            logger.info("seed: usuário admin criado", extra={"email": email})
+        elif existing.password_hash is None:
+            existing.password_hash = hash_password(settings.admin_password)
+            existing.role = "admin"
+            logger.info("seed: senha do admin definida", extra={"email": email})
         else:
-            logger.info("seed: usuário dev já existe")
+            logger.info("seed: usuário admin já existe")

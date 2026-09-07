@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from nbplatform.api.deps import SessionDep
+from nbplatform.api.deps import CurrentUserId, SessionDep
 from nbplatform.schemas.workflow import (
     WorkflowCreate,
     WorkflowDetail,
@@ -14,6 +14,7 @@ from nbplatform.schemas.workflow import (
     WorkflowRead,
     WorkflowUpdate,
 )
+from nbplatform.services.audit_service import AuditService
 from nbplatform.services.workflow_service import WorkflowService
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -31,11 +32,18 @@ async def list_workflows(
 
 @router.post("", response_model=WorkflowDetail, status_code=status.HTTP_201_CREATED)
 async def create_workflow(
-    payload: WorkflowCreate, session: SessionDep
+    payload: WorkflowCreate, session: SessionDep, user_id: CurrentUserId
 ) -> WorkflowDetail:
     service = WorkflowService(session)
     workflow = await service.create(name=payload.name, description=payload.description)
     await session.flush()
+    await AuditService(session).record(
+        user_id=user_id,
+        action="CREATE_WORKFLOW",
+        resource_type="workflow",
+        resource_id=str(workflow.id),
+        metadata={"name": workflow.name},
+    )
     return WorkflowDetail.model_validate(await service.get(workflow.id))
 
 

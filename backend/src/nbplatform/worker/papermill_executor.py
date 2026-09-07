@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -43,7 +44,9 @@ async def run_papermill(
     timeout_s: float,
     on_line: LineHandler,
     cancel_event: asyncio.Event | None = None,
+    env: dict[str, str] | None = None,
 ) -> PapermillResult:
+    child_env = {**os.environ, **(env or {})}
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
@@ -53,6 +56,7 @@ async def run_papermill(
         params_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env=child_env,
     )
 
     error_summary: str | None = None

@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Query, Response, status
 
-from nbplatform.api.deps import RedisDep, SessionDep
+from nbplatform.api.deps import CurrentUserId, RedisDep, SessionDep
 from nbplatform.core.errors import ConflictError
 from nbplatform.domain.enums import ExecutionStatus
 from nbplatform.domain.state_machine import TERMINAL_EXECUTION_STATES
@@ -17,6 +17,7 @@ from nbplatform.schemas.execution import (
     ExecutionLogRead,
     ExecutionRead,
 )
+from nbplatform.services.audit_service import AuditService
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.ws.events import make_event, publish_execution_event
 
@@ -39,6 +40,7 @@ async def execute_notebook(
     payload: ExecutionCreate,
     session: SessionDep,
     redis: RedisDep,
+    user_id: CurrentUserId,
 ) -> ExecutionRead:
     service = ExecutionService(session)
     execution, created = await service.create_for_notebook(
@@ -49,6 +51,13 @@ async def execute_notebook(
     )
     result = ExecutionRead.model_validate(execution)
     if created:
+        await AuditService(session).record(
+            user_id=user_id,
+            action="EXECUTE_NOTEBOOK",
+            resource_type="execution",
+            resource_id=str(execution.id),
+            metadata={"notebook_id": str(notebook_id)},
+        )
         # Garante o commit antes de enfileirar para o worker não perder a corrida.
         await session.commit()
         await ExecutionQueue(redis).enqueue(str(execution.id), attempt=1)

@@ -9,10 +9,12 @@ from fastapi import APIRouter, Query, status
 from nbplatform.api.deps import CurrentUserId, RedisDep, SessionDep
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError
+from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import JobStatus, TriggerType
 from nbplatform.domain.job_state import JOB_TERMINAL
 from nbplatform.repositories.workflow_repository import WorkflowRepository
 from nbplatform.schemas.job import JobDetail, JobLogRead, JobRead, JobRunRequest, JobTaskRead
+from nbplatform.services.audit_service import AuditService
 from nbplatform.services.job_orchestrator import JobOrchestrator
 from nbplatform.services.job_service import JobService
 from nbplatform.ws.events import make_event, publish_job_event
@@ -58,6 +60,14 @@ async def run_workflow(
         created_by=user_id,
         parameters=payload.parameters,
     )
+    async with session_scope() as audit_session:
+        await AuditService(audit_session).record(
+            user_id=user_id,
+            action="RUN_WORKFLOW",
+            resource_type="job",
+            resource_id=str(job_id),
+            metadata={"workflow_id": str(workflow_id)},
+        )
     return JobRead.model_validate(await JobService(session).get(job_id))
 
 
@@ -90,13 +100,16 @@ async def get_job_logs(
 
 @router.post("/api/jobs/{job_id}/cancel", response_model=JobRead)
 async def cancel_job(
-    job_id: uuid.UUID, session: SessionDep, redis: RedisDep
+    job_id: uuid.UUID, session: SessionDep, redis: RedisDep, user_id: CurrentUserId
 ) -> JobRead:
     service = JobService(session)
     current = await service.get_status(job_id)  # 404
     if current not in JOB_TERMINAL:
         await redis.set(
             get_settings().job_cancel_key(str(job_id)), "1", ex=3600
+        )
+        await AuditService(session).record(
+            user_id=user_id, action="CANCEL_JOB", resource_type="job", resource_id=str(job_id)
         )
         await publish_job_event(
             redis, str(job_id), make_event("status_changed", status="CANCELLING")

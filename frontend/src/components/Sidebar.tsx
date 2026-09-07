@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useAuthContext } from "@/components/AuthProvider";
 
 interface Item {
   label: string;
@@ -37,8 +38,10 @@ const GROUPS: Group[] = [
 ];
 
 export function Sidebar() {
+  const { user, logout } = useAuthContext();
+
   return (
-    <nav className="w-56 shrink-0 border-r border-slate-200 bg-slate-50 p-4 text-sm">
+    <nav className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-50 p-4 text-sm">
       <div className="mb-6 px-2 text-base font-semibold text-slate-800">nbplatform</div>
       {GROUPS.map((group) => (
         <div key={group.heading ?? "root"} className="mb-5">
@@ -64,6 +67,17 @@ export function Sidebar() {
           ))}
         </div>
       ))}
+      <div className="mt-auto border-t border-slate-200 px-2 pt-3 text-xs text-slate-500">
+        <div className="truncate">{user?.email}</div>
+        <div className="text-slate-400">{user?.role}</div>
+        <button
+          type="button"
+          onClick={logout}
+          className="mt-1 text-slate-600 hover:underline"
+        >
+          sair
+        </button>
+      </div>
     </nav>
   );
 }

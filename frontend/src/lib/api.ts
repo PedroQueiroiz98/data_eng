@@ -1,5 +1,15 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+let authToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -28,12 +38,18 @@ async function request<T>(
   body?: unknown,
 ): Promise<T> {
   const url = resolveUrl(path);
-  const init: RequestInit = { method, headers: { Accept: "application/json" } };
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const init: RequestInit = { method, headers };
   if (body !== undefined) {
-    (init.headers as Record<string, string>)["Content-Type"] = "application/json";
+    headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
   const res = await fetch(url, init);
+
+  if (res.status === 401 && !path.startsWith("/auth/login")) {
+    window.dispatchEvent(new CustomEvent("nbp:unauthorized"));
+  }
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();

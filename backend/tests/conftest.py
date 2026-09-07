@@ -42,16 +42,40 @@ async def _dispose_engine_at_end() -> AsyncIterator[None]:
     await dispose_engine()
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _seed_admin() -> None:
+    if not os.environ.get("NBP_INTEGRATION"):
+        return
+    import contextlib
+
+    from nbplatform.services.seed import ensure_admin_user
+
+    with contextlib.suppress(Exception):
+        await ensure_admin_user()
+
+
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     from nbplatform.api.main import create_app
+    from nbplatform.core.config import get_settings
 
     app = create_app()
     transport = httpx.ASGITransport(app=app)
+    settings = get_settings()
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=transport, base_url="http://test") as ac,
     ):
+        if os.environ.get("NBP_INTEGRATION"):
+            resp = await ac.post(
+                "/api/auth/login",
+                json={
+                    "email": settings.admin_email,
+                    "password": settings.admin_password,
+                },
+            )
+            if resp.status_code == 200:
+                ac.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
         yield ac
 
 

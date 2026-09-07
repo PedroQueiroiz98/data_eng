@@ -4,8 +4,10 @@ Plataforma web para criar, editar, executar e orquestrar **notebooks Python**, u
 **Papermill** como executor oficial. A aplicação controla workflows, jobs, retries, timeouts,
 logs, agendamento e segurança — o Papermill apenas executa os notebooks.
 
-> Status: **Fase 1 — Infraestrutura**. As fases seguintes (Notebook, Papermill, Resiliência,
-> Workflow, Jobs, Scheduler, Segurança, Observabilidade) são entregues em sequência.
+> Status: **Fases 1–9 concluídas.** Notebook → editar → salvar → executar (Worker → Papermill →
+> `output.ipynb`), workflows/DAG → Job com tasks em paralelo, retry/timeout/cancelamento/recovery,
+> scheduler cron, auth + secrets + auditoria + sandbox Docker, e `/metrics` Prometheus.
+> Fluxo de acesso: `admin@nbplatform.local` / `admin` (troque em produção).
 
 ## Arquitetura
 
@@ -196,6 +198,70 @@ UI: `/jobs` (lista estilo GitHub Actions, ✓/✕/○ + duração) e `/jobs/:id`
 link para os logs da Execution + timeline ao vivo por WebSocket). Botão **Executar** no editor
 de workflow leva ao Job.
 
+## Scheduler (Fase 7)
+
+O serviço `scheduler` roda APScheduler e **só cria Jobs** (nunca Papermill). A cada 15s
+reconcilia os cron jobs ativos com os `schedules` habilitados no banco (`SchedulerPort` +
+`APSchedulerAdapter`; o domínio só conhece a porta → trocável por Prefect). Quando um cron
+dispara, `run_due_schedule` cria um Job com `trigger_type=SCHEDULED` e atualiza
+`last_run_at` / `next_run_at`.
+
+| Método | Rota | Descrição |
+| ------ | ---- | --------- |
+| `GET`  | `/api/schedules?workflow_id=` | lista |
+| `POST` | `/api/schedules` | `{workflow_id, cron, timezone?, enabled?, parameters?}` |
+| `GET`  | `/api/schedules/{id}` | detalhe |
+| `PUT`  | `/api/schedules/{id}` | altera cron/timezone/enabled/parameters |
+| `DELETE` | `/api/schedules/{id}` | remove |
+
+Cron inválido ou timezone inválido → `422`. UI em `/schedules` (form + tabela com toggle
+ativo/inativo). A validação de cron usa `CronTrigger.from_crontab` (5 campos padrão).
+
+## Segurança (Fase 8)
+
+**Auth** — JWT (`HS256`, `pyjwt`). Senha com PBKDF2-SHA256 (stdlib). `POST /api/auth/login`
+→ `{access_token, user}`; `GET /api/auth/me`; `POST /api/auth/register` (admin). Todos os
+endpoints REST exigem `Authorization: Bearer <jwt>` (exceto `/health`, `/ready`,
+`/api/auth/login`); o WebSocket usa `?token=<jwt>`. Papéis: `admin` (gerencia secrets, users,
+audit) e `member`. Admin é semeado de `NBP_ADMIN_EMAIL`/`NBP_ADMIN_PASSWORD`.
+
+**Secrets** — cifrados em repouso (Fernet, `NBP_SECRET_ENCRYPTION_KEY`). O **valor nunca sai
+da API** (`GET /api/secrets` devolve só `key`+timestamps). Na execução são injetados como
+**env var** no sandbox e **mascarados** (`***`) nos `execution_logs` e no `output.ipynb`.
+`GET/PUT/DELETE /api/secrets[/{key}]` (admin).
+
+**Variables** — valores não-sensíveis, retornáveis, injetados como env var na execução.
+`GET/PUT/DELETE /api/variables[/{key}]`.
+
+**Isolamento Docker** — `NBP_EXECUTION_SANDBOX=subprocess` (default, dev) ou `docker`.
+`DockerSandbox` roda `docker run` **hardened**: sem `--privileged`, **sem** montar o socket,
+`--network none`, `--read-only` + `--tmpfs /tmp`, `--cpus`/`--memory`/`--pids-limit`,
+`--cap-drop ALL`, `--security-opt no-new-privileges`, usuário não-root (uid 1000 da imagem),
+timeout com `docker kill`. Modo `docker` exige montar `/var/run/docker.sock` no serviço
+`worker` (documentar via override; o container **de execução** nunca o vê).
+
+**Auditoria** — `audit_logs` registra `LOGIN`, `CREATE/UPDATE/DELETE_NOTEBOOK`,
+`EXECUTE_NOTEBOOK`, `CREATE_WORKFLOW`, `RUN_WORKFLOW`, `CANCEL_JOB`, `UPSERT/DELETE_SECRET`,
+`UPSERT/DELETE_VARIABLE`, `CREATE_USER`. `GET /api/audit-logs` (admin).
+
+UI: tela de **Login**, guarda de rota (redireciona para `/login`), logout na sidebar,
+páginas `/secrets` (admin) e `/variables`.
+
+## Observabilidade (Fase 9)
+
+`GET /metrics` (**público**, formato Prometheus `text/plain; version=0.0.4`) — calculado sob
+demanda de Postgres + Redis, sem estado em processo nem dependência extra:
+
+`nbp_executions_total`, `nbp_executions_success_total`, `nbp_executions_failed_total`,
+`nbp_executions_running`, `nbp_executions_queued`, `nbp_execution_duration_seconds_{sum,count}`,
+`nbp_jobs_total`, `nbp_jobs_success_total`, `nbp_jobs_failed_total`, `nbp_jobs_running`,
+`nbp_jobs_queued`, `nbp_queue_size`, `nbp_dlq_size`, `nbp_worker_active`, `nbp_scheduler_active`.
+
+Logs estruturados em JSON em todos os serviços (`core/logging.py`), incluindo um access-log
+por request na API (`method`, `path`, `status`, `duration_ms`). `/health` (liveness) e `/ready`
+(Postgres + Redis + heartbeat de worker/scheduler). Página `/settings` mostra a saúde e o link
+para `/metrics`.
+
 ## Desenvolvimento
 
 ### Backend
@@ -276,6 +342,6 @@ Todas as variáveis em `.env.example`. Destaques:
 4. **Resiliência** ✅ — RetryPolicy + classificação de erro, retry auto (backoff + delayed queue) e manual, timeout, cancelamento, recovery de lease expirado, DLQ.
 5. **Workflow** ✅ — CRUD, editor React Flow, DAG com detecção de ciclo no backend, save transacional do grafo.
 6. **Jobs** ✅ — `POST /workflows/{id}/run`, orquestrador (ready-set, paralelismo, SKIPPED em cascata), cancel/retry, `/ws/jobs/{id}`, UI GitHub Actions.
-7. Scheduler — cron, ativar/desativar, execução automática.
-8. Segurança — auth/authz, secrets criptografados + masking, isolamento Docker, auditoria.
-9. Observabilidade — métricas Prometheus, logs estruturados, readiness completo.
+7. **Scheduler** ✅ — CRUD de schedules, cron via APScheduler (`SchedulerPort` trocável), reconcile loop, cria Job `SCHEDULED`.
+8. **Segurança** ✅ — auth JWT + papéis, secrets cifrados (valor nunca sai) + masking em logs/output + env inject, variables, sandbox Docker hardened, audit logs.
+9. **Observabilidade** ✅ — `/metrics` Prometheus (jobs/executions/queue/dlq/worker), access-log JSON, `/health` + `/ready`, página Settings.

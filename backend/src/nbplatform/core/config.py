@@ -17,7 +17,21 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://nbplatform:nbplatform@localhost:5432/nbplatform"
     redis_url: str = "redis://localhost:6379/0"
 
-    secret_encryption_key: str = "CHANGE_ME_generate_a_real_fernet_key_base64_32bytes="
+    # Dev only — gere uma chave real em produção (docs no .env.example).
+    secret_encryption_key: str = "iY0uDAIk3AqhPlmaVTZOGf-Bajj5kjmIDRZiwqRLvDc="
+
+    # ─── Auth ───
+    jwt_secret: str = "dev-only-change-me-jwt-secret-0123456789abcdef"
+    jwt_expire_minutes: int = 720
+    admin_email: str = "admin@nbplatform.local"
+    admin_password: str = "admin"
+
+    # ─── Sandbox de execução ───
+    execution_sandbox: Literal["subprocess", "docker"] = "subprocess"
+    sandbox_image: str = "nbplatform-backend"
+    sandbox_cpus: str = "1"
+    sandbox_memory: str = "512m"
+    sandbox_pids_limit: int = 256
 
     max_concurrent_jobs: int = 5
     max_concurrent_executions: int = 5

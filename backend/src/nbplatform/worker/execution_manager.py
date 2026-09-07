@@ -16,12 +16,15 @@ from redis.asyncio import Redis
 
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError
+from nbplatform.core.masking import mask_secrets
 from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import ExecutionStatus, LogLevel
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.services.retry_coordinator import RetryCoordinator
-from nbplatform.worker.papermill_executor import run_papermill
+from nbplatform.services.secret_service import SecretService
+from nbplatform.services.variable_service import VariableService
+from nbplatform.worker.sandbox import run_sandboxed
 from nbplatform.ws.events import make_event, publish_execution_event
 
 logger = logging.getLogger(__name__)
@@ -35,6 +38,7 @@ class ExecutionManager:
         self.worker_id = worker_id
         self.settings = get_settings()
         self.queue = ExecutionQueue(redis)
+        self._secret_values: list[str] = []
 
     async def run(self, execution_id: str, *, attempt: int) -> ExecutionStatus:
         exec_uuid = uuid.UUID(execution_id)
@@ -58,14 +62,18 @@ class ExecutionManager:
             json.dumps(await self._parameters(exec_uuid)), encoding="utf-8"
         )
 
+        env = await self._build_env()
+
         cancel_event = asyncio.Event()
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(exec_uuid))
         cancel_watch = asyncio.create_task(self._cancel_watch(execution_id, cancel_event))
         try:
-            result = await run_papermill(
+            result = await run_sandboxed(
+                workdir=str(workdir),
                 input_path=str(input_path),
                 output_path=str(output_path),
                 params_path=str(params_path),
+                env=env,
                 timeout_s=float(timeout_s or self.settings.execution_timeout_s),
                 on_line=lambda line: self._emit_log(exec_uuid, attempt, line),
                 cancel_event=cancel_event,
@@ -76,7 +84,7 @@ class ExecutionManager:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-        output_nb = _read_notebook(output_path)
+        output_nb = self._mask_notebook(_read_notebook(output_path))
         output_path_str = str(output_path) if output_path.exists() else None
 
         # ── cancelamento ─────────────────────────────────────────────────────
@@ -195,7 +203,29 @@ class ExecutionManager:
             execution = await ExecutionService(session).get(exec_uuid)
             return dict(execution.parameters or {})
 
+    def _mask_notebook(self, nb: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Mascara valores de secrets no output.ipynb (nunca gravar segredo em notebook)."""
+        if nb is None or not self._secret_values:
+            return nb
+        masked: dict[str, Any] = json.loads(
+            mask_secrets(json.dumps(nb), self._secret_values)
+        )
+        return masked
+
+    async def _build_env(self) -> dict[str, str]:
+        """Variáveis (visíveis) + secrets (cifrados) → env vars da execução."""
+        async with session_scope() as session:
+            variables = await VariableService(session).resolve()
+            secrets = await SecretService(session).resolve_all()
+        self._secret_values = [v for v in secrets.values() if v]
+        merged: dict[str, str] = {}
+        merged.update({k: str(v) for k, v in variables.items()})
+        merged.update({k: str(v) for k, v in secrets.items()})
+        return merged
+
     async def _emit_log(self, exec_uuid: uuid.UUID, attempt: int, line: str) -> None:
+        if self._secret_values:
+            line = mask_secrets(line, self._secret_values)
         seq = await self.queue.next_seq(str(exec_uuid))
         level = LogLevel.ERROR if line.startswith("PAPERMILL_ERROR::") else LogLevel.INFO
         async with session_scope() as session:

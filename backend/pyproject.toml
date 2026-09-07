@@ -17,6 +17,7 @@ dependencies = [
     "nbformat>=5.10",
     "papermill>=2.6",
     "ipykernel>=6.29",
+    "pyjwt>=2.9",
 ]
 
 [project.optional-dependencies]
