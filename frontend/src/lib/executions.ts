@@ -67,3 +67,15 @@ export const executeNotebook = (
   body: { parameters?: Record<string, unknown>; notebook_version_number?: number },
 ): Promise<Execution> =>
   apiPost<Execution>(`/notebooks/${notebookId}/execute`, body);
+
+export const cancelExecution = (id: string): Promise<Execution> =>
+  apiPost<Execution>(`/executions/${id}/cancel`);
+
+export const retryExecution = (id: string): Promise<Execution> =>
+  apiPost<Execution>(`/executions/${id}/retry`);
+
+export const canCancel = (s: ExecutionStatus): boolean =>
+  s === "QUEUED" || s === "RUNNING";
+
+export const canRetry = (s: ExecutionStatus): boolean =>
+  s === "FAILED" || s === "TIMEOUT";

@@ -7,7 +7,9 @@ import uuid
 from fastapi import APIRouter, Query, Response, status
 
 from nbplatform.api.deps import RedisDep, SessionDep
+from nbplatform.core.errors import ConflictError
 from nbplatform.domain.enums import ExecutionStatus
+from nbplatform.domain.state_machine import TERMINAL_EXECUTION_STATES
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.schemas.execution import (
     ExecutionCreate,
@@ -16,6 +18,7 @@ from nbplatform.schemas.execution import (
     ExecutionRead,
 )
 from nbplatform.services.execution_service import ExecutionService
+from nbplatform.ws.events import make_event, publish_execution_event
 
 router = APIRouter(tags=["executions"])
 
@@ -50,6 +53,53 @@ async def execute_notebook(
         await session.commit()
         await ExecutionQueue(redis).enqueue(str(execution.id), attempt=1)
     return result
+
+
+@router.post("/api/executions/{execution_id}/cancel", response_model=ExecutionRead)
+async def cancel_execution(
+    execution_id: uuid.UUID, session: SessionDep, redis: RedisDep
+) -> ExecutionRead:
+    service = ExecutionService(session)
+    execution = await service.get(execution_id)  # 404
+
+    if execution.status in TERMINAL_EXECUTION_STATES:
+        return ExecutionRead.model_validate(execution)
+
+    if execution.status == ExecutionStatus.QUEUED:
+        updated, _ = await service.cancel(execution_id)
+        await session.commit()
+        await publish_execution_event(
+            redis,
+            str(execution_id),
+            make_event("status_changed", status=ExecutionStatus.CANCELLED),
+        )
+        return ExecutionRead.model_validate(updated)
+
+    # RUNNING: sinaliza; o worker termina o processo e transiciona para CANCELLED.
+    await ExecutionQueue(redis).request_cancel(str(execution_id))
+    return ExecutionRead.model_validate(execution)
+
+
+@router.post("/api/executions/{execution_id}/retry", response_model=ExecutionRead)
+async def retry_execution(
+    execution_id: uuid.UUID, session: SessionDep, redis: RedisDep
+) -> ExecutionRead:
+    service = ExecutionService(session)
+    execution = await service.get(execution_id)
+    if execution.status not in {ExecutionStatus.FAILED, ExecutionStatus.TIMEOUT}:
+        raise ConflictError(
+            f"Só é possível refazer execuções FAILED ou TIMEOUT (atual: {execution.status}). "
+            "Para reexecutar uma execução cancelada, dispare o notebook novamente."
+        )
+    updated = await service.requeue_for_retry(execution_id)
+    await session.commit()
+    await ExecutionQueue(redis).enqueue(str(execution_id), attempt=updated.attempt)
+    await publish_execution_event(
+        redis,
+        str(execution_id),
+        make_event("status_changed", status=ExecutionStatus.QUEUED, attempt=updated.attempt),
+    )
+    return ExecutionRead.model_validate(updated)
 
 
 @router.get("/api/executions", response_model=list[ExecutionRead])

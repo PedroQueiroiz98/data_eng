@@ -121,6 +121,30 @@ fallback. `idempotency_key` evita execuções duplicadas.
 > Execução de **célula individual** contra um kernel vivo (estilo Jupyter) é um mecanismo
 > distinto do executor Papermill e está fora do escopo desta fase.
 
+## Resiliência (Fase 4)
+
+- **RetryPolicy** (`domain/retry_policy.py`) — backoff exponencial (`initial_delay * multiplier^(n-1)`,
+  capado em `max_delay`), `retry_mode` `ANY` | `TRANSIENT_ONLY`. Lógica num só lugar.
+- **Classificação de erro** (`domain/error_classification.py`) — `TRANSIENT` / `PERMANENT` /
+  `UNKNOWN` por código interno + marcadores na mensagem (ex.: `NameError` → PERMANENT;
+  `OperationalError`/`503` → TRANSIENT; `LEASE_EXPIRED` → TRANSIENT).
+- **Retry automático** — ao falhar, o `RetryCoordinator` decide: re-enfileirar com atraso
+  (ZSET `nbp:queue:executions:delayed`, promovido pelo worker) ou **DLQ** (`nbp:dlq:executions`)
+  quando os retries esgotam ou o erro não é elegível. O evento WS emitido é o status final
+  (retry → `QUEUED`, não `FAILED`).
+- **Timeout** — subprocesso morto ao exceder `EXECUTION_TIMEOUT_S` → `TIMEOUT`.
+- **Cancelamento** — `POST /api/executions/{id}/cancel` (idempotente): `QUEUED` → `CANCELLED`
+  direto; `RUNNING` → sinaliza `nbp:cancel:<id>`, o worker termina o subprocesso e transiciona.
+- **Retry manual** — `POST /api/executions/{id}/retry`: `FAILED`/`TIMEOUT` → `QUEUED`
+  (attempt+1, enfileirado na hora).
+- **Recovery** (`worker/recovery.py`) — a cada `RECOVERY_INTERVAL_S`, `RUNNING` com
+  `last_heartbeat` além de `WORKER_LEASE_TIMEOUT_S` → falha a tentativa (`LEASE_EXPIRED`) e
+  aplica retry/DLQ. `SELECT ... FOR UPDATE SKIP LOCKED` evita corrida entre workers. Nunca
+  fica preso em `RUNNING`.
+
+Config em `.env.example` (`NBP_EXECUTION_MAX_RETRIES`, `NBP_EXECUTION_RETRY_MODE`, delays,
+`NBP_RECOVERY_INTERVAL_S`).
+
 ## Desenvolvimento
 
 ### Backend
@@ -198,7 +222,7 @@ Todas as variáveis em `.env.example`. Destaques:
 1. **Infraestrutura** ✅ — monorepo, Docker Compose, Postgres, Redis, FastAPI, React, health checks.
 2. **Notebook** ✅ — CRUD, versionamento imutável, editor Monaco, salvar `.ipynb` (nbformat v4).
 3. **Papermill** ✅ — Execution, Worker (fila Redis + subprocesso), output.ipynb, logs, status, WebSocket com replay.
-4. Resiliência — retry, timeout, cancelamento, heartbeat/recovery, idempotência, DLQ.
+4. **Resiliência** ✅ — RetryPolicy + classificação de erro, retry auto (backoff + delayed queue) e manual, timeout, cancelamento, recovery de lease expirado, DLQ.
 5. Workflow — CRUD, React Flow, DAG, dependências, paralelismo.
 6. Jobs — histórico, detalhes, JobTasks, logs em tempo real.
 7. Scheduler — cron, ativar/desativar, execução automática.

@@ -148,6 +148,63 @@ class ExecutionService:
         await self.session.flush()
         return execution
 
+    async def cancel(self, execution_id: uuid.UUID) -> tuple[Execution, bool]:
+        """Idempotente. Retorna (execution, changed). QUEUED→CANCELLED direto;
+        RUNNING marca a intenção (o worker termina o processo) e transiciona aqui
+        apenas se ainda não estiver rodando de fato."""
+        execution = await self._locked(execution_id)
+        if execution.status in (ExecutionStatus.QUEUED,):
+            execution.status = ExecutionStatus.CANCELLED
+            execution.finished_at = _now()
+            await self.session.flush()
+            return execution, True
+        return execution, False
+
+    async def mark_cancelled(self, execution_id: uuid.UUID) -> Execution:
+        execution = await self._locked(execution_id)
+        assert_transition(execution.status, ExecutionStatus.CANCELLED)
+        execution.status = ExecutionStatus.CANCELLED
+        execution.finished_at = _now()
+        if execution.started_at is not None:
+            execution.duration_ms = int(
+                (execution.finished_at - execution.started_at).total_seconds() * 1000
+            )
+        await self.session.flush()
+        return execution
+
+    async def requeue_for_retry(self, execution_id: uuid.UUID) -> Execution:
+        """FAILED/TIMEOUT → QUEUED, incrementa attempt, limpa erro/tempos."""
+        execution = await self._locked(execution_id)
+        assert_transition(execution.status, ExecutionStatus.QUEUED)
+        execution.status = ExecutionStatus.QUEUED
+        execution.attempt += 1
+        execution.started_at = None
+        execution.finished_at = None
+        execution.duration_ms = None
+        execution.error_code = None
+        execution.error_message = None
+        execution.worker_id = None
+        execution.last_heartbeat = None
+        await self.session.flush()
+        return execution
+
+    async def force_fail(
+        self, execution_id: uuid.UUID, *, error_code: str, error_message: str
+    ) -> Execution | None:
+        """Usado pela recovery: RUNNING abandonado → FAILED. None se já não é RUNNING."""
+        execution = await self._locked(execution_id)
+        if execution.status is not ExecutionStatus.RUNNING:
+            return None
+        execution.status = ExecutionStatus.FAILED
+        execution.finished_at = _now()
+        execution.error_code = error_code
+        execution.error_message = error_message
+        await self.session.flush()
+        return execution
+
+    async def list_stale_running(self, *, older_than: datetime) -> list[Execution]:
+        return await self.repo.list_stale_running(older_than=older_than)
+
     async def _locked(self, execution_id: uuid.UUID) -> Execution:
         execution = await self.repo.get_for_update(execution_id)
         if execution is None:

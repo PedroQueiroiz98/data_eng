@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelExecution,
   executeNotebook,
   getExecution,
   getExecutionOutput,
   listExecutions,
+  retryExecution,
   type ExecutionStatus,
 } from "@/lib/executions";
 
@@ -43,6 +45,22 @@ export function useExecuteNotebook(notebookId: string) {
   return useMutation({
     mutationFn: (body: { parameters?: Record<string, unknown> }) =>
       executeNotebook(notebookId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function useCancelExecution(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelExecution(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function useRetryExecution(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => retryExecution(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

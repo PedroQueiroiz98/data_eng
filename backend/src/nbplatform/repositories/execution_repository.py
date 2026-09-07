@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nbplatform.domain.enums import ExecutionStatus
@@ -44,6 +45,22 @@ class ExecutionRepository:
         if notebook_version_id is not None:
             stmt = stmt.where(Execution.notebook_version_id == notebook_version_id)
         stmt = stmt.limit(limit).offset(offset)
+        return list(await self.session.scalars(stmt))
+
+    async def list_stale_running(self, *, older_than: datetime) -> list[Execution]:
+        """RUNNING cujo heartbeat expirou. SKIP LOCKED: workers não colidem."""
+        stmt = (
+            select(Execution)
+            .where(
+                Execution.status == ExecutionStatus.RUNNING,
+                or_(
+                    Execution.last_heartbeat.is_(None),
+                    Execution.last_heartbeat < older_than,
+                ),
+            )
+            .with_for_update(skip_locked=True)
+            .limit(50)
+        )
         return list(await self.session.scalars(stmt))
 
     async def add_log(self, log: ExecutionLog) -> None:

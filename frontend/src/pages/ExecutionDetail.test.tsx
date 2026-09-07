@@ -1,0 +1,79 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ExecutionDetail } from "@/pages/ExecutionDetail";
+
+vi.mock("@/lib/ws", () => ({ openExecutionSocket: () => () => {} }));
+
+function renderAt(id: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[`/executions/${id}`]}>
+        <Routes>
+          <Route path="/executions/:id" element={<ExecutionDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+const execution = (over: Record<string, unknown>) => ({
+  id: "e1",
+  notebook_version_id: "v1",
+  status: "RUNNING",
+  attempt: 1,
+  parameters: {},
+  created_at: "2026-09-07T00:00:00Z",
+  started_at: null,
+  finished_at: null,
+  duration_ms: null,
+  error_code: null,
+  error_message: null,
+  worker_id: "w1",
+  output_notebook_path: null,
+  has_output: false,
+  ...over,
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("ExecutionDetail actions", () => {
+  it("mostra Cancelar para execução RUNNING e chama o endpoint", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input) => {
+        const url = String(input);
+        if (url.endsWith("/cancel")) {
+          return Promise.resolve(
+            new Response(JSON.stringify(execution({ status: "CANCELLED" })), { status: 200 }),
+          );
+        }
+        return Promise.resolve(new Response(JSON.stringify(execution({})), { status: 200 }));
+      });
+
+    renderAt("e1");
+    const btn = await screen.findByRole("button", { name: /Cancelar/ });
+    await userEvent.click(btn);
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([u]) => String(u).endsWith("/executions/e1/cancel")),
+      ).toBe(true),
+    );
+  });
+
+  it("mostra Refazer para execução FAILED", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify(execution({ status: "FAILED", error_code: "NOTEBOOK_ERROR" })),
+        { status: 200 },
+      ),
+    );
+    renderAt("e1");
+    expect(await screen.findByRole("button", { name: /Refazer/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cancelar/ })).not.toBeInTheDocument();
+  });
+});

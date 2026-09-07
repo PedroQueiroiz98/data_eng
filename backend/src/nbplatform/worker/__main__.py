@@ -1,7 +1,8 @@
 """`python -m nbplatform.worker` — consome a fila e executa notebooks via Papermill.
 
-Fase 3: lease via BLMOVE, execução em subprocesso, logs em tempo real, output.ipynb.
-Recovery de lease expirado / retry / DLQ chegam na Fase 4.
+- lease via BLMOVE (lista principal → processing)
+- promoção da delayed queue (retries com backoff)
+- loop de recovery (execuções abandonadas por worker morto)
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from nbplatform.core.runtime import heartbeat_loop, install_signal_handlers
 from nbplatform.queue.execution_queue import ExecutionQueue, QueueMessage
 from nbplatform.queue.redis_client import close_redis, get_redis, ping
 from nbplatform.worker.execution_manager import ExecutionManager, cleanup_workdir
+from nbplatform.worker.recovery import recover_stale_executions
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,9 @@ async def _consume_loop(stop: asyncio.Event) -> None:
     tasks: set[asyncio.Task[None]] = set()
 
     while not stop.is_set():
+        with contextlib.suppress(Exception):
+            await queue.promote_due()
+
         await sem.acquire()
         if stop.is_set():
             sem.release()
@@ -78,12 +83,29 @@ async def _consume_loop(stop: asyncio.Event) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _recovery_loop(stop: asyncio.Event) -> None:
+    interval = get_settings().recovery_interval_s
+    redis = get_redis()
+    while not stop.is_set():
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        if stop.is_set():
+            break
+        try:
+            await recover_stale_executions(redis)
+        except Exception:
+            logger.exception("erro no loop de recovery")
+
+
 async def _run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, service="worker")
     logger.info(
         "worker up",
-        extra={"worker_id": WORKER_ID, "max_concurrent": settings.max_concurrent_executions},
+        extra={
+            "worker_id": WORKER_ID,
+            "max_concurrent": settings.max_concurrent_executions,
+        },
     )
 
     if not await ping():
@@ -94,14 +116,16 @@ async def _run() -> None:
     install_signal_handlers(asyncio.get_running_loop(), stop)
 
     hb = asyncio.create_task(heartbeat_loop("worker", stop))
+    recovery = asyncio.create_task(_recovery_loop(stop))
     consumer = asyncio.create_task(_consume_loop(stop))
     try:
-        await asyncio.gather(hb, consumer)
+        await asyncio.gather(hb, recovery, consumer)
     finally:
         stop.set()
-        hb.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await hb
+        for task in (hb, recovery):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await close_redis()
         logger.info("worker down", extra={"worker_id": WORKER_ID})
 

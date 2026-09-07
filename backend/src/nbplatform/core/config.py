@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     execution_timeout_s: int = 1800
     worker_heartbeat_interval_s: int = 10
     worker_lease_timeout_s: int = 60
+    recovery_interval_s: int = 30
+
+    # Política de retry padrão para execuções avulsas (workflow tasks trazem a sua).
+    execution_max_retries: int = 2
+    execution_retry_initial_delay_s: float = 10.0
+    execution_retry_backoff_multiplier: float = 2.0
+    execution_retry_max_delay_s: float = 300.0
+    execution_retry_mode: str = "TRANSIENT_ONLY"
 
     backend_port: int = 8000
 
@@ -35,15 +43,29 @@ class Settings(BaseSettings):
     redis_heartbeat_prefix: str = "nbp:heartbeat:"
     redis_queue_executions: str = "nbp:queue:executions"
     redis_queue_executions_processing: str = "nbp:queue:executions:processing"
+    redis_queue_executions_delayed: str = "nbp:queue:executions:delayed"
     redis_dlq_executions: str = "nbp:dlq:executions"
     redis_exec_seq_prefix: str = "nbp:execseq:"
     redis_exec_event_prefix: str = "nbp:events:execution:"
+    redis_cancel_prefix: str = "nbp:cancel:"
 
     def exec_seq_key(self, execution_id: str) -> str:
         return f"{self.redis_exec_seq_prefix}{execution_id}"
 
     def exec_event_channel(self, execution_id: str) -> str:
         return f"{self.redis_exec_event_prefix}{execution_id}"
+
+    def cancel_key(self, execution_id: str) -> str:
+        return f"{self.redis_cancel_prefix}{execution_id}"
+
+    def default_retry_policy_dict(self) -> dict[str, object]:
+        return {
+            "max_retries": self.execution_max_retries,
+            "initial_delay_seconds": self.execution_retry_initial_delay_s,
+            "backoff_multiplier": self.execution_retry_backoff_multiplier,
+            "max_delay_seconds": self.execution_retry_max_delay_s,
+            "retry_mode": self.execution_retry_mode,
+        }
 
     @property
     def is_test(self) -> bool:

@@ -13,10 +13,13 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from typing import cast
 
 from redis.asyncio import Redis
 
 from nbplatform.core.config import get_settings
+
+CANCEL_TTL_S = 3600
 
 
 @dataclass(frozen=True)
@@ -68,13 +71,57 @@ class ExecutionQueue:
 
     async def to_dlq(self, message: QueueMessage, *, reason: str) -> None:
         await self.ack(message)
+        await self.dead_letter(message.execution_id, attempt=message.attempt, reason=reason)
+
+    async def dead_letter(self, execution_id: str, *, attempt: int, reason: str) -> None:
         payload = json.dumps(
-            {"execution_id": message.execution_id, "attempt": message.attempt, "reason": reason}
+            {
+                "execution_id": execution_id,
+                "attempt": attempt,
+                "reason": reason,
+                "at": time.time(),
+            }
         )
         await self.redis.lpush(self.settings.redis_dlq_executions, payload)
+
+    async def dlq_size(self) -> int:
+        return int(await self.redis.llen(self.settings.redis_dlq_executions))
 
     async def queued_count(self) -> int:
         return int(await self.redis.llen(self.settings.redis_queue_executions))
 
     async def next_seq(self, execution_id: str) -> int:
         return int(await self.redis.incr(self.settings.exec_seq_key(execution_id)))
+
+    # ── retry com atraso (backoff) ───────────────────────────────────────────
+    async def enqueue_delayed(
+        self, execution_id: str, *, attempt: int, ready_at: float
+    ) -> None:
+        await self.redis.zadd(
+            self.settings.redis_queue_executions_delayed,
+            {_encode(execution_id, attempt): ready_at},
+        )
+
+    async def promote_due(self, *, now: float | None = None) -> int:
+        """Move entradas vencidas da delayed queue para a fila principal."""
+        now = time.time() if now is None else now
+        key = self.settings.redis_queue_executions_delayed
+        due = cast("list[str]", await self.redis.zrangebyscore(key, min=0, max=now))
+        promoted = 0
+        for raw in due:
+            if await self.redis.zrem(key, raw):  # só quem removeu promove (evita corrida)
+                await self.redis.lpush(self.settings.redis_queue_executions, raw)
+                promoted += 1
+        return promoted
+
+    # ── cancelamento (sinal para o worker que está executando) ───────────────
+    async def request_cancel(self, execution_id: str) -> None:
+        await self.redis.set(
+            self.settings.cancel_key(execution_id), "1", ex=CANCEL_TTL_S
+        )
+
+    async def is_cancel_requested(self, execution_id: str) -> bool:
+        return bool(await self.redis.exists(self.settings.cancel_key(execution_id)))
+
+    async def clear_cancel(self, execution_id: str) -> None:
+        await self.redis.delete(self.settings.cancel_key(execution_id))

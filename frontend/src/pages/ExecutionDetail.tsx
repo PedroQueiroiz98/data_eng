@@ -2,18 +2,32 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import { NotebookOutputView } from "@/components/notebook/NotebookOutputView";
-import { useExecution, useExecutionOutput } from "@/hooks/useExecutions";
-import { isTerminal, type ExecutionLog, type ExecutionStatus } from "@/lib/executions";
+import {
+  useCancelExecution,
+  useExecution,
+  useExecutionOutput,
+  useRetryExecution,
+} from "@/hooks/useExecutions";
+import {
+  canCancel,
+  canRetry,
+  isTerminal,
+  type ExecutionLog,
+  type ExecutionStatus,
+} from "@/lib/executions";
 import { openExecutionSocket } from "@/lib/ws";
 
 export function ExecutionDetail() {
   const { id = "" } = useParams();
+  const cancel = useCancelExecution(id);
+  const retry = useRetryExecution(id);
 
   const [status, setStatus] = useState<ExecutionStatus | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [connected, setConnected] = useState(false);
   const [outputReady, setOutputReady] = useState(false);
+  const [reopenNonce, setReopenNonce] = useState(0);
   const seenSeq = useRef<Set<number>>(new Set());
 
   // fallback REST (caso o WS não conecte); pára o polling quando terminal
@@ -46,7 +60,15 @@ export function ExecutionDetail() {
       onOutput: () => setOutputReady(true),
     });
     return close;
-  }, [id]);
+  }, [id, reopenNonce]);
+
+  const onRetry = async () => {
+    await retry.mutateAsync();
+    setStatus("QUEUED");
+    setErrorMessage(null);
+    setOutputReady(false);
+    setReopenNonce((n) => n + 1); // reabre o WS para acompanhar a nova tentativa
+  };
 
   useEffect(() => {
     if (rest?.has_output) setOutputReady(true);
@@ -64,9 +86,35 @@ export function ExecutionDetail() {
         </Link>
         <span className="font-mono text-sm text-slate-500">{id.slice(0, 8)}</span>
         {effectiveStatus && <StatusBadge status={effectiveStatus} />}
-        <span className={`ml-auto text-xs ${connected ? "text-green-600" : "text-slate-400"}`}>
-          {connected ? "● ao vivo" : "○ reconectando"}
-        </span>
+        {rest?.attempt ? (
+          <span className="text-xs text-slate-400">tentativa #{rest.attempt}</span>
+        ) : null}
+
+        <div className="ml-auto flex items-center gap-2">
+          {effectiveStatus && canCancel(effectiveStatus) && (
+            <button
+              type="button"
+              onClick={() => cancel.mutate()}
+              disabled={cancel.isPending}
+              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40"
+            >
+              {cancel.isPending ? "Cancelando…" : "Cancelar"}
+            </button>
+          )}
+          {effectiveStatus && canRetry(effectiveStatus) && (
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={retry.isPending}
+              className="rounded bg-slate-800 px-2 py-1 text-xs text-white disabled:opacity-40"
+            >
+              {retry.isPending ? "Refazendo…" : "Refazer"}
+            </button>
+          )}
+          <span className={`text-xs ${connected ? "text-green-600" : "text-slate-400"}`}>
+            {connected ? "● ao vivo" : "○ reconectando"}
+          </span>
+        </div>
       </div>
 
       {errorMessage && (

@@ -8,10 +8,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from nbplatform.worker.papermill_runner import (
-    EXIT_NOTEBOOK_ERROR,
-    EXIT_OK,
-)
+from nbplatform.worker.papermill_runner import EXIT_NOTEBOOK_ERROR, EXIT_OK
 
 LineHandler = Callable[[str], Awaitable[None]]
 
@@ -22,15 +19,20 @@ ERROR_PREFIX = "PAPERMILL_ERROR::"
 class PapermillResult:
     exit_code: int
     timed_out: bool
+    cancelled: bool
     error_summary: str | None
 
     @property
     def succeeded(self) -> bool:
-        return self.exit_code == EXIT_OK and not self.timed_out
+        return self.exit_code == EXIT_OK and not self.timed_out and not self.cancelled
 
     @property
     def is_notebook_error(self) -> bool:
-        return self.exit_code == EXIT_NOTEBOOK_ERROR and not self.timed_out
+        return (
+            self.exit_code == EXIT_NOTEBOOK_ERROR
+            and not self.timed_out
+            and not self.cancelled
+        )
 
 
 async def run_papermill(
@@ -40,6 +42,7 @@ async def run_papermill(
     params_path: str,
     timeout_s: float,
     on_line: LineHandler,
+    cancel_event: asyncio.Event | None = None,
 ) -> PapermillResult:
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -65,18 +68,45 @@ async def run_papermill(
                 error_summary = line[len(ERROR_PREFIX) :]
             await on_line(line)
 
+    async def _watch_cancel() -> None:
+        if cancel_event is None:
+            await asyncio.Future()  # nunca resolve
+        else:
+            await cancel_event.wait()
+
+    pump_task = asyncio.create_task(_pump())
+    wait_task = asyncio.create_task(proc.wait())
+    cancel_task = asyncio.create_task(_watch_cancel())
+
     timed_out = False
+    cancelled = False
     try:
-        await asyncio.wait_for(asyncio.gather(_pump(), proc.wait()), timeout=timeout_s)
-    except TimeoutError:
-        timed_out = True
-        proc.kill()
+        done, _ = await asyncio.wait(
+            {wait_task, cancel_task}, timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not done:
+            timed_out = True
+        elif cancel_task in done:
+            cancelled = True
+    finally:
+        if timed_out or cancelled:
+            proc.kill()
         with contextlib.suppress(ProcessLookupError):
             await proc.wait()
+        cancel_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cancel_task
+        with contextlib.suppress(Exception):
+            await pump_task
+
+    if timed_out:
         await on_line(f"{ERROR_PREFIX}timeout após {timeout_s:.0f}s — processo terminado")
+    elif cancelled:
+        await on_line(f"{ERROR_PREFIX}cancelado — processo terminado")
 
     return PapermillResult(
         exit_code=proc.returncode if proc.returncode is not None else -1,
         timed_out=timed_out,
+        cancelled=cancelled,
         error_summary=error_summary,
     )
