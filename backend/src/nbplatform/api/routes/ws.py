@@ -12,9 +12,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from nbplatform.core.errors import NotFoundError
 from nbplatform.db.session import session_scope
 from nbplatform.queue.redis_client import get_redis
-from nbplatform.repositories.workflow_repository import WorkflowRepository
 from nbplatform.schemas.execution import ExecutionDetail, ExecutionLogRead
-from nbplatform.schemas.job import JobLogRead, JobTaskRead
+from nbplatform.schemas.job import JobLogRead
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.services.job_service import JobService
 from nbplatform.ws.events import subscribe_execution_events, subscribe_job_events
@@ -97,23 +96,13 @@ async def job_ws(websocket: WebSocket, job_id: str) -> None:
     try:
         async with session_scope() as session:
             service = JobService(session)
-            job = await service.get(job_uuid)
-            wf = await WorkflowRepository(session).get_with_graph(job.workflow_id)
-            name_by_wtid = {t.id: t.name for t in (wf.tasks if wf else [])}
+            detail = await service.detail(job_uuid)
             logs = await service.logs_since(job_uuid, after_seq=after_seq)
-            tasks = []
-            for jt in job.tasks:
-                item = JobTaskRead.model_validate(jt)
-                item.name = name_by_wtid.get(jt.workflow_task_id, "")
-                tasks.append(item.model_dump(mode="json"))
+            job_json = detail.model_dump(mode="json")
+            tasks = job_json.pop("tasks", [])
             snapshot = {
                 "type": "snapshot",
-                "job": {
-                    "id": str(job.id),
-                    "status": job.status.value,
-                    "workflow_id": str(job.workflow_id),
-                    "workflow_name": wf.name if wf else "",
-                },
+                "job": job_json,
                 "tasks": tasks,
                 "logs": [
                     JobLogRead.model_validate(log).model_dump(mode="json") for log in logs

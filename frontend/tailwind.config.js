@@ -53,10 +53,16 @@ export default {
           from: { opacity: "0", transform: "translateY(8px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "indeterminate": {
+          "0%": { transform: "translateX(-100%) scaleX(0.4)" },
+          "50%": { transform: "translateX(20%) scaleX(0.6)" },
+          "100%": { transform: "translateX(120%) scaleX(0.4)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 120ms ease-out both",
         "slide-up": "slide-up 160ms cubic-bezier(0.2,0,0,1) both",
+        "indeterminate": "indeterminate 1.4s ease-in-out infinite",
       },
     },
   },

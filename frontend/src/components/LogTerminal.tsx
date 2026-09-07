@@ -1,15 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconButton } from "@/ui/IconButton";
 import { useToast } from "@/ui/Toast";
-import { DownloadIcon, DuplicateIcon } from "@/ui/icons";
+import { DownloadIcon, DuplicateIcon, MaximizeIcon, MinimizeIcon } from "@/ui/icons";
 
 export interface LogLine {
   seq: number;
   level?: string;
   message: string;
+  ts?: string;
 }
 
-const LEVELS = ["ALL", "INFO", "WARNING", "ERROR"] as const;
+const LEVELS = [
+  { id: "ALL", label: "Todos" },
+  { id: "INFO", label: "Info" },
+  { id: "WARNING", label: "Warn" },
+  { id: "ERROR", label: "Error" },
+] as const;
+type Level = (typeof LEVELS)[number]["id"];
+
+function clock(ts?: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
+}
 
 export function LogTerminal({
   lines,
@@ -21,9 +34,10 @@ export function LogTerminal({
   filename?: string;
 }) {
   const toast = useToast();
-  const [level, setLevel] = useState<(typeof LEVELS)[number]>("ALL");
+  const [level, setLevel] = useState<Level>("ALL");
   const [query, setQuery] = useState("");
   const [autoscroll, setAutoscroll] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
@@ -40,31 +54,53 @@ export function LogTerminal({
   }, [filtered.length, autoscroll]);
 
   const asText = () =>
-    filtered.map((l) => `${String(l.seq).padStart(4, "0")} ${l.message}`).join("\n");
+    filtered
+      .map((l) => `${l.ts ? `[${clock(l.ts)}] ` : ""}${(l.level ?? "INFO").padEnd(5)} ${l.message}`)
+      .join("\n");
+
+  const counts = useMemo(() => {
+    let warn = 0;
+    let err = 0;
+    for (const l of lines) {
+      if (l.level === "WARNING") warn++;
+      else if (l.level === "ERROR") err++;
+    }
+    return { warn, err };
+  }, [lines]);
 
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+        <h2 className="text-sm font-semibold text-fg">{title}</h2>
+        <div className="flex items-center gap-0.5 rounded-md border border-surface-border p-0.5">
+          {LEVELS.map((l) => {
+            const on = level === l.id;
+            const badge =
+              l.id === "WARNING" ? counts.warn : l.id === "ERROR" ? counts.err : null;
+            return (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setLevel(l.id)}
+                className={`rounded px-2 py-0.5 text-xs transition ${
+                  on ? "bg-primary text-primary-fg" : "text-fg-muted hover:bg-surface-variant"
+                }`}
+              >
+                {l.label}
+                {badge != null && badge > 0 && <span className="ml-1 opacity-80">{badge}</span>}
+              </button>
+            );
+          })}
+        </div>
         <div className="ml-auto flex items-center gap-2">
-          <select
-            value={level}
-            onChange={(e) => setLevel(e.target.value as (typeof LEVELS)[number])}
-            className="rounded border border-surface-border bg-surface px-2 py-1 text-xs"
-          >
-            {LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {l === "ALL" ? "Todos os níveis" : l}
-              </option>
-            ))}
-          </select>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Pesquisar"
-            className="w-40 rounded border border-surface-border bg-surface px-2 py-1 text-xs"
+            placeholder="Pesquisar nos logs"
+            className="w-44 rounded border border-surface-border bg-surface px-2 py-1 text-xs
+              placeholder:text-fg-faint focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
-          <label className="flex items-center gap-1 text-xs text-slate-500">
+          <label className="flex items-center gap-1 text-xs text-fg-muted">
             <input
               type="checkbox"
               checked={autoscroll}
@@ -72,6 +108,18 @@ export function LogTerminal({
             />
             auto-scroll
           </label>
+          <IconButton
+            label={expanded ? "Recolher" : "Expandir"}
+            size="sm"
+            icon={
+              expanded ? (
+                <MinimizeIcon className="h-4 w-4" />
+              ) : (
+                <MaximizeIcon className="h-4 w-4" />
+              )
+            }
+            onClick={() => setExpanded((v) => !v)}
+          />
           <IconButton
             label="Copiar logs"
             size="sm"
@@ -97,25 +145,32 @@ export function LogTerminal({
           />
         </div>
       </div>
-      <div className="max-h-96 overflow-auto rounded-lg border border-slate-800 bg-slate-900 p-3 font-mono text-xs leading-relaxed text-slate-100">
-        {filtered.length === 0 && <span className="text-slate-500">sem logs…</span>}
-        {filtered.map((l) => (
-          <div
-            key={l.seq}
-            className={
-              (l.level ?? "INFO") === "ERROR"
-                ? "text-red-400"
-                : (l.level ?? "INFO") === "WARNING"
-                  ? "text-amber-300"
-                  : ""
-            }
-          >
-            <span className="select-none text-slate-500">
-              {String(l.seq).padStart(4, "0")}{" "}
-            </span>
-            {l.message}
-          </div>
-        ))}
+      <div
+        className={`overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs leading-relaxed text-zinc-100 ${
+          expanded ? "max-h-[75vh]" : "max-h-96"
+        }`}
+      >
+        {filtered.length === 0 && <span className="text-zinc-500">sem logs…</span>}
+        {filtered.map((l) => {
+          const lvl = l.level ?? "INFO";
+          return (
+            <div
+              key={l.seq}
+              className={
+                lvl === "ERROR"
+                  ? "text-red-400"
+                  : lvl === "WARNING"
+                    ? "text-amber-300"
+                    : ""
+              }
+            >
+              <span className="select-none text-zinc-500">
+                {l.ts ? `[${clock(l.ts)}] ` : `${String(l.seq).padStart(4, "0")} `}
+              </span>
+              {l.message}
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
     </div>

@@ -43,7 +43,9 @@ class JobRepository:
         workflow_id: uuid.UUID | None = None,
         status: JobStatus | None = None,
     ) -> list[Job]:
-        stmt = select(Job).order_by(Job.created_at.desc())
+        stmt = (
+            select(Job).order_by(Job.created_at.desc()).options(selectinload(Job.tasks))
+        )
         if workflow_id is not None:
             stmt = stmt.where(Job.workflow_id == workflow_id)
         if status is not None:

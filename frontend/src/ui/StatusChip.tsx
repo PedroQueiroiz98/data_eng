@@ -41,6 +41,36 @@ const MAP: Record<string, Spec> = {
 
 const FALLBACK: Spec = { label: "—", cls: "bg-fg/10 text-fg-muted", Icon: QueuedIcon };
 
+const TONE: Record<string, string> = {
+  SUCCESS: "text-ok",
+  ACTIVE: "text-ok",
+  ENABLED: "text-ok",
+  RUNNING: "text-info",
+  FAILED: "text-danger",
+  TIMEOUT: "text-warn",
+  SKIPPED: "text-warn",
+  DISABLED: "text-warn",
+  SCHEDULED: "text-primary",
+};
+
+/** Só o ícone de status (para timelines/steppers), sem o rótulo/badge. */
+export function StatusIcon({
+  status,
+  className = "h-4 w-4",
+}: {
+  status: string;
+  className?: string;
+}) {
+  const spec = MAP[status] ?? FALLBACK;
+  const { Icon } = spec;
+  return (
+    <Icon
+      className={`${className} ${TONE[status] ?? "text-fg-faint"} ${spec.spin ? "animate-spin" : ""}`}
+      aria-label={spec.label}
+    />
+  );
+}
+
 export function StatusChip({
   status,
   size = "md",

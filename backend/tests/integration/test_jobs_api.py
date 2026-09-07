@@ -44,6 +44,27 @@ async def test_run_creates_job_and_tasks(client) -> None:
     assert any(j["id"] == job["id"] for j in listing)
 
 
+async def test_job_detail_exposes_params_user_and_notebook(client) -> None:
+    wf = await _workflow(client)
+    job = (
+        await client.post(
+            f"/api/workflows/{wf}/run",
+            json={"parameters": {"date": "2026-09-07", "api_key": "super-secret-value"}},
+        )
+    ).json()
+
+    detail = (await client.get(f"/api/jobs/{job['id']}")).json()
+    # parâmetros presentes e valor sensível mascarado
+    assert detail["parameters"]["date"] == "2026-09-07"
+    assert detail["parameters"]["api_key"] == "********"
+    # quem iniciou (e-mail do admin do seed)
+    assert detail["started_by"] and "@" in detail["started_by"]
+    # notebook associado a cada tarefa
+    for t in detail["tasks"]:
+        assert t["notebook_id"]
+        assert t["notebook_name"] == "jn"
+
+
 async def test_cancel_job_is_idempotent(client) -> None:
     wf = await _workflow(client)
     job = (await client.post(f"/api/workflows/{wf}/run", json={})).json()

@@ -52,4 +52,9 @@ export {
   Sun as LightIcon,
   Moon as DarkIcon,
   MonitorSmartphone as SystemIcon,
+  Maximize2 as MaximizeIcon,
+  Minimize2 as MinimizeIcon,
+  GitBranch as BranchIcon,
+  User as UserIcon,
+  Clock as ClockIcon,
 } from "lucide-react";

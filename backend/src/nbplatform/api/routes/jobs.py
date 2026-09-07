@@ -10,36 +10,15 @@ from nbplatform.api.deps import CurrentUserId, RedisDep, SessionDep
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError
 from nbplatform.db.session import session_scope
-from nbplatform.domain.enums import JobStatus, TriggerType
+from nbplatform.domain.enums import JobStatus, JobTaskStatus, TriggerType
 from nbplatform.domain.job_state import JOB_TERMINAL
-from nbplatform.repositories.workflow_repository import WorkflowRepository
-from nbplatform.schemas.job import JobDetail, JobLogRead, JobRead, JobRunRequest, JobTaskRead
+from nbplatform.schemas.job import JobDetail, JobLogRead, JobRead, JobRunRequest
 from nbplatform.services.audit_service import AuditService
 from nbplatform.services.job_orchestrator import JobOrchestrator
 from nbplatform.services.job_service import JobService
 from nbplatform.ws.events import make_event, publish_job_event
 
 router = APIRouter(tags=["jobs"])
-
-
-async def _detail(session: SessionDep, job_id: uuid.UUID) -> JobDetail:
-    service = JobService(session)
-    job = await service.get(job_id)
-    wf = await WorkflowRepository(session).get_with_graph(job.workflow_id)
-    name_by_wtid = {t.id: t.name for t in (wf.tasks if wf else [])}
-
-    detail = JobDetail.model_validate(job)
-    detail.workflow_name = wf.name if wf else ""
-    detail.tasks = []
-    for jt in sorted(job.tasks, key=lambda t: name_by_wtid.get(t.workflow_task_id, "")):
-        item = JobTaskRead.model_validate(jt)
-        item.name = name_by_wtid.get(jt.workflow_task_id, "")
-        detail.tasks.append(item)
-    detail.dependencies = [
-        {"from": str(d.from_task_id), "to": str(d.to_task_id)}
-        for d in (wf.dependencies if wf else [])
-    ]
-    return detail
 
 
 @router.post(
@@ -82,12 +61,20 @@ async def list_jobs(
     jobs = await JobService(session).list_jobs(
         limit=limit, offset=offset, workflow_id=workflow_id, status=status_filter
     )
-    return [JobRead.model_validate(j) for j in jobs]
+    out: list[JobRead] = []
+    for j in jobs:
+        item = JobRead.model_validate(j)
+        item.task_total = len(j.tasks)
+        item.task_success = sum(1 for t in j.tasks if t.status == JobTaskStatus.SUCCESS)
+        item.task_failed = sum(1 for t in j.tasks if t.status == JobTaskStatus.FAILED)
+        item.task_running = sum(1 for t in j.tasks if t.status == JobTaskStatus.RUNNING)
+        out.append(item)
+    return out
 
 
 @router.get("/api/jobs/{job_id}", response_model=JobDetail)
 async def get_job(job_id: uuid.UUID, session: SessionDep) -> JobDetail:
-    return await _detail(session, job_id)
+    return await JobService(session).detail(job_id)
 
 
 @router.get("/api/jobs/{job_id}/logs", response_model=list[JobLogRead])

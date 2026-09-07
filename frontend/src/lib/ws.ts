@@ -6,6 +6,7 @@ import {
 } from "@/lib/executions";
 import {
   isJobTerminal,
+  type JobDetail,
   type JobLog,
   type JobStatus,
   type JobTask,
@@ -154,7 +155,7 @@ export function openExecutionSocket(
 
 export interface JobSnapshotEvent {
   type: "snapshot";
-  job: { id: string; status: JobStatus; workflow_name: string };
+  job: Omit<JobDetail, "tasks">;
   tasks: JobTask[];
   logs: JobLog[];
 }

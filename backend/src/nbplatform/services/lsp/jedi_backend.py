@@ -10,7 +10,7 @@ import contextlib
 import functools
 from dataclasses import dataclass, field
 
-import jedi  # type: ignore[import-untyped]
+import jedi
 
 _MAX_DOC = 2000
 # `path=None` => buffer não-salvo: o Jedi resolve símbolos dentro do próprio

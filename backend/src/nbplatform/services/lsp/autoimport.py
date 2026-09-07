@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import jedi  # type: ignore[import-untyped]
+import jedi
 
 # nome exposto -> (statement, módulo de origem)
 _CURATED: dict[str, tuple[str, str]] = {

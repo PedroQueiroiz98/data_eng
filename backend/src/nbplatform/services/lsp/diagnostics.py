@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 
-from pyflakes import api as pyflakes_api  # type: ignore[import-untyped]
+from pyflakes import api as pyflakes_api
 from pyflakes import messages as pyflakes_messages
 
 _ERROR_MESSAGES = tuple(
