@@ -34,12 +34,7 @@ class WorkflowRepository:
         return await self.session.scalar(stmt)
 
     async def list_paged(self, *, limit: int, offset: int) -> list[Workflow]:
-        stmt = (
-            select(Workflow)
-            .order_by(Workflow.updated_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(Workflow).order_by(Workflow.updated_at.desc()).limit(limit).offset(offset)
         return list(await self.session.scalars(stmt))
 
     async def delete(self, workflow: Workflow) -> None:
@@ -52,15 +47,11 @@ class WorkflowRepository:
     async def delete_tasks(self, workflow_id: uuid.UUID, task_ids: list[uuid.UUID]) -> None:
         if not task_ids:
             return
-        await self.session.execute(
-            delete(WorkflowTask).where(WorkflowTask.id.in_(task_ids))
-        )
+        await self.session.execute(delete(WorkflowTask).where(WorkflowTask.id.in_(task_ids)))
 
     async def clear_dependencies(self, workflow_id: uuid.UUID) -> None:
         await self.session.execute(
-            delete(WorkflowDependency).where(
-                WorkflowDependency.workflow_id == workflow_id
-            )
+            delete(WorkflowDependency).where(WorkflowDependency.workflow_id == workflow_id)
         )
 
     async def count_tasks(self, workflow_id: uuid.UUID) -> int:

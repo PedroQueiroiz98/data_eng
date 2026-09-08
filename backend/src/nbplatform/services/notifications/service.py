@@ -154,11 +154,7 @@ class NotificationService(INotificationService):
         if job is None:
             return None
         if event.event_type is NotificationEventType.JOB_FAILED:
-            task = (
-                await session.get(JobTask, event.job_task_id)
-                if event.job_task_id
-                else None
-            )
+            task = await session.get(JobTask, event.job_task_id) if event.job_task_id else None
             if task is None:
                 return None
             return await build_job_message(session, job, task)
@@ -231,7 +227,10 @@ class NotificationService(INotificationService):
             sender = self._registry.get(provider_type)
         except UnknownProviderType:
             return await self._finish_failure(
-                delivery_id, provider_type, attempt, max_attempts,
+                delivery_id,
+                provider_type,
+                attempt,
+                max_attempts,
                 f"tipo '{provider_type}' sem implementação",
             )
 
@@ -279,9 +278,8 @@ class NotificationService(INotificationService):
             return NotificationStatus.SENT
 
         error = (
-            (result.error if result is not None else None)
-            or f"timeout após {self.settings.notification_send_timeout_s:.0f}s"
-        )
+            result.error if result is not None else None
+        ) or f"timeout após {self.settings.notification_send_timeout_s:.0f}s"
         return await self._finish_failure(
             delivery_id, provider_type, attempt, max_attempts, error, took_ms
         )
@@ -320,9 +318,7 @@ class NotificationService(INotificationService):
                         "duration_ms": took_ms,
                     },
                 )
-                await self.queue.enqueue_delayed(
-                    str(delivery_id), ready_at=time.time() + delay
-                )
+                await self.queue.enqueue_delayed(str(delivery_id), ready_at=time.time() + delay)
                 return NotificationStatus.PENDING
 
             row.status = NotificationStatus.FAILED

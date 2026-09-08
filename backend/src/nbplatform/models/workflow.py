@@ -43,9 +43,16 @@ class WorkflowTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=TaskType.NOTEBOOK,
         nullable=False,
     )
+    # Legado: referência ao módulo global de notebooks (removido). Mantido para
+    # workflows antigos; novos workflows usam (workspace_id, notebook_path).
     notebook_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("notebooks.id", ondelete="RESTRICT"), index=True
     )
+    # Notebook como arquivo do Workspace (fonte de verdade atual).
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    notebook_path: Mapped[str | None] = mapped_column(String(1024))
     parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     timeout_s: Mapped[int | None] = mapped_column(Integer)
     max_retries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -59,9 +66,7 @@ class WorkflowTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class WorkflowDependency(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "workflow_dependencies"
     __table_args__ = (
-        UniqueConstraint(
-            "workflow_id", "from_task_id", "to_task_id", name="uq_workflow_edge"
-        ),
+        UniqueConstraint("workflow_id", "from_task_id", "to_task_id", name="uq_workflow_edge"),
     )
 
     workflow_id: Mapped[uuid.UUID] = mapped_column(

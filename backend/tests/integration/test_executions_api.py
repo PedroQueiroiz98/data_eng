@@ -5,21 +5,23 @@ import pytest
 from nbplatform.queue.redis_client import get_redis
 from nbplatform.worker.execution_manager import ExecutionManager, cleanup_workdir
 from tests.conftest import requires_services
-from tests.integration.helpers import drive_job, make_notebook, make_workflow, notebook_content
+from tests.integration.helpers import (
+    drive_job,
+    execute_ws_notebook,
+    make_notebook,
+    make_workflow,
+    make_workspace,
+    make_workspace_notebook,
+    notebook_content,
+)
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
 
-async def _notebook(client) -> str:
-    resp = await client.post("/api/notebooks", json={"name": "exec-me"})
-    assert resp.status_code == 201
-    return resp.json()["id"]
-
-
 async def test_execute_enqueues_execution(client) -> None:
-    nb_id = await _notebook(client)
-    resp = await client.post(
-        f"/api/notebooks/{nb_id}/execute", json={"parameters": {"environment": "dev"}}
+    ws_id, path = await make_workspace_notebook(client, source="print('ok')")
+    resp = await execute_ws_notebook(
+        client, ws_id, path, parameters={"environment": "dev"}
     )
     assert resp.status_code == 202, resp.text
     body = resp.json()
@@ -39,36 +41,31 @@ async def test_execute_enqueues_execution(client) -> None:
 
 
 async def test_execute_is_idempotent_by_key(client) -> None:
-    nb_id = await _notebook(client)
-    first = await client.post(
-        f"/api/notebooks/{nb_id}/execute", json={"idempotency_key": "run-42"}
-    )
-    second = await client.post(
-        f"/api/notebooks/{nb_id}/execute", json={"idempotency_key": "run-42"}
-    )
+    ws_id, path = await make_workspace_notebook(client)
+    first = await execute_ws_notebook(client, ws_id, path, idempotency_key="run-42")
+    second = await execute_ws_notebook(client, ws_id, path, idempotency_key="run-42")
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json()["id"] == second.json()["id"]
 
 
 async def test_execute_missing_notebook_is_404(client) -> None:
-    resp = await client.post(
-        "/api/notebooks/00000000-0000-0000-0000-000000000000/execute", json={}
-    )
+    ws_id = await make_workspace(client)
+    resp = await execute_ws_notebook(client, ws_id, "notebooks/nope.ipynb")
     assert resp.status_code == 404
 
 
 async def test_list_filters_by_status(client) -> None:
-    nb_id = await _notebook(client)
-    await client.post(f"/api/notebooks/{nb_id}/execute", json={})
+    ws_id, path = await make_workspace_notebook(client)
+    await execute_ws_notebook(client, ws_id, path)
     queued = (await client.get("/api/executions?status=QUEUED&limit=200")).json()
     assert all(e["status"] == "QUEUED" for e in queued)
     assert len(queued) >= 1
 
 
 async def test_delete_queued_execution_cancels_then_removes(client) -> None:
-    nb_id = await _notebook(client)
-    ex = (await client.post(f"/api/notebooks/{nb_id}/execute", json={})).json()
+    ws_id, path = await make_workspace_notebook(client)
+    ex = (await execute_ws_notebook(client, ws_id, path)).json()
     assert ex["status"] == "QUEUED"
     resp = await client.delete(f"/api/executions/{ex['id']}")
     assert resp.status_code == 204, resp.text
@@ -76,10 +73,12 @@ async def test_delete_queued_execution_cancels_then_removes(client) -> None:
 
 
 async def test_delete_terminal_standalone_execution(client) -> None:
-    nb_id = await _notebook(client)
-    ex_id = (await client.post(f"/api/notebooks/{nb_id}/execute", json={})).json()["id"]
+    ws_id, path = await make_workspace_notebook(client, source="print('ok')")
+    ex_id = (await execute_ws_notebook(client, ws_id, path)).json()["id"]
     try:
-        status = await ExecutionManager(get_redis(), worker_id="test-del").run(ex_id, attempt=1)
+        status = await ExecutionManager(get_redis(), worker_id="test-del").run(
+            ex_id, attempt=1
+        )
     finally:
         cleanup_workdir(ex_id)
     assert status.value == "SUCCESS"

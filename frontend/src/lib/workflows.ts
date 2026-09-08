@@ -17,6 +17,8 @@ export interface WorkflowTask {
   name: string;
   type: TaskType;
   notebook_id: string | null;
+  workspace_id: string | null;
+  notebook_path: string | null;
   parameters: Record<string, unknown>;
   timeout_s: number | null;
   max_retries: number;
@@ -40,6 +42,8 @@ export interface TaskInput {
   name: string;
   type?: TaskType;
   notebook_id?: string | null;
+  workspace_id?: string | null;
+  notebook_path?: string | null;
   parameters?: Record<string, unknown>;
   timeout_s?: number | null;
   max_retries?: number;
@@ -86,6 +90,8 @@ export interface FlowNodeLike {
   data: {
     name: string;
     notebookId: string | null;
+    workspaceId?: string | null;
+    notebookPath?: string | null;
     timeoutS: number | null;
     maxRetries: number;
   };
@@ -105,7 +111,9 @@ export function buildGraphPayload(
       key: n.id,
       name: n.data.name,
       type: "NOTEBOOK",
-      notebook_id: n.data.notebookId,
+      notebook_id: n.data.workspaceId ? null : n.data.notebookId,
+      workspace_id: n.data.workspaceId ?? null,
+      notebook_path: n.data.notebookPath ?? null,
       timeout_s: n.data.timeoutS,
       max_retries: n.data.maxRetries,
       ui_position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },

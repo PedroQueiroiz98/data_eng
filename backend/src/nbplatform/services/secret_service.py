@@ -33,9 +33,7 @@ class SecretService:
         return secret
 
     async def list_keys(self) -> list[Secret]:
-        return list(
-            await self.session.scalars(select(Secret).order_by(Secret.key))
-        )
+        return list(await self.session.scalars(select(Secret).order_by(Secret.key)))
 
     async def delete(self, key: str) -> None:
         secret = await self.session.scalar(select(Secret).where(Secret.key == key))

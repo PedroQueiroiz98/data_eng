@@ -9,6 +9,7 @@ from nbplatform.domain.enums import ExecutionStatus
 from nbplatform.queue.redis_client import get_redis
 from nbplatform.worker.execution_manager import ExecutionManager, cleanup_workdir
 from tests.conftest import requires_services
+from tests.integration.helpers import execute_ws_notebook, make_workspace
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
@@ -34,11 +35,16 @@ def _notebook(cells_source: list[tuple[str, list[str]]]) -> dict:
     }
 
 
-async def _prepare(client, content: dict) -> str:
-    nb_id = client_json(await client.post("/api/notebooks", json={"name": "w"}))["id"]
-    resp = await client.post(f"/api/notebooks/{nb_id}/versions", json={"content": content})
-    assert resp.status_code == 201, resp.text
-    return nb_id
+async def _prepare(client, content: dict) -> tuple[str, str]:
+    ws_id = await make_workspace(client)
+    path = "notebooks/w.ipynb"
+    resp = await client.put(
+        f"/api/workspaces/{ws_id}/file",
+        params={"path": path},
+        json={"notebook": content},
+    )
+    assert resp.status_code == 200, resp.text
+    return ws_id, path
 
 
 def client_json(resp):
@@ -46,9 +52,10 @@ def client_json(resp):
     return resp.json()
 
 
-async def _run_execution(client, nb_id: str, parameters: dict) -> str:
+async def _run_execution(client, target: tuple[str, str], parameters: dict) -> str:
+    ws_id, path = target
     body = client_json(
-        await client.post(f"/api/notebooks/{nb_id}/execute", json={"parameters": parameters})
+        await execute_ws_notebook(client, ws_id, path, parameters=parameters)
     )
     exec_id = body["id"]
     manager = ExecutionManager(get_redis(), worker_id="test-worker")
@@ -66,8 +73,8 @@ async def test_successful_run_injects_params_and_stores_output(client) -> None:
             ("code", 'print(f"got {msg}")\n'),
         ]
     )
-    nb_id = await _prepare(client, content)
-    exec_id = await _run_execution(client, nb_id, {"msg": "hello"})
+    target = await _prepare(client, content)
+    exec_id = await _run_execution(client, target, {"msg": "hello"})
 
     detail = client_json(await client.get(f"/api/executions/{exec_id}"))
     assert detail["status"] == ExecutionStatus.SUCCESS
@@ -86,8 +93,8 @@ async def test_successful_run_injects_params_and_stores_output(client) -> None:
 
 async def test_failing_notebook_marks_failed_with_error(client) -> None:
     content = _notebook([("code", 'raise ValueError("boom")\n')])
-    nb_id = await _prepare(client, content)
-    exec_id = await _run_execution(client, nb_id, {})
+    target = await _prepare(client, content)
+    exec_id = await _run_execution(client, target, {})
 
     detail = client_json(await client.get(f"/api/executions/{exec_id}"))
     assert detail["status"] == ExecutionStatus.FAILED

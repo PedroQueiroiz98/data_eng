@@ -9,14 +9,18 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError, DomainValidationError, NotFoundError
 from nbplatform.domain.dag import validate_dag
 from nbplatform.domain.enums import TaskType, WorkflowStatus
+from nbplatform.domain.workspace_paths import is_ipynb
 from nbplatform.models.job import Job
 from nbplatform.models.notebook import Notebook
 from nbplatform.models.workflow import Workflow, WorkflowDependency, WorkflowTask
 from nbplatform.repositories.workflow_repository import WorkflowRepository
 from nbplatform.schemas.workflow import WorkflowEdgeInput, WorkflowTaskInput
+from nbplatform.services.workspace_fs_service import WorkspaceFsService
+from nbplatform.services.workspace_service import WorkspaceService
 
 
 class WorkflowService:
@@ -26,9 +30,7 @@ class WorkflowService:
 
     # ── CRUD ────────────────────────────────────────────────────────────────
     async def create(self, *, name: str, description: str | None) -> Workflow:
-        workflow = Workflow(
-            name=name, description=description, status=WorkflowStatus.DRAFT
-        )
+        workflow = Workflow(name=name, description=description, status=WorkflowStatus.DRAFT)
         await self.repo.add(workflow)
         return workflow
 
@@ -95,9 +97,7 @@ class WorkflowService:
         edge_keys = [(e.from_key, e.to_key) for e in dependencies]
         for src, dst in edge_keys:
             if src not in key_set or dst not in key_set:
-                raise DomainValidationError(
-                    "Dependência referencia tarefa fora do grafo."
-                )
+                raise DomainValidationError("Dependência referencia tarefa fora do grafo.")
         validate_dag(key_set, edge_keys)
 
         existing = {t.id: t for t in await self.repo.tasks_for(workflow_id)}
@@ -134,29 +134,60 @@ class WorkflowService:
 
     # ── helpers ────────────────────────────────────────────────────────────
     async def _validate_task_types(self, tasks: list[WorkflowTaskInput]) -> None:
-        notebook_ids: set[uuid.UUID] = set()
+        legacy_notebook_ids: set[uuid.UUID] = set()
         for task in tasks:
             if task.type is not TaskType.NOTEBOOK:
                 raise DomainValidationError(
                     f"Tipo de tarefa não suportado nesta fase: {task.type}."
                 )
-            if task.notebook_id is None:
-                raise DomainValidationError(
-                    f"Tarefa '{task.name}' precisa de um notebook_id."
+            if task.workspace_id is not None and task.notebook_path:
+                await self._validate_workspace_notebook(
+                    task.name, task.workspace_id, task.notebook_path
                 )
-            notebook_ids.add(task.notebook_id)
+            elif task.notebook_id is not None:
+                legacy_notebook_ids.add(task.notebook_id)  # workflow antigo
+            else:
+                raise DomainValidationError(
+                    f"Tarefa '{task.name}' precisa de um notebook do Workspace "
+                    "(workspace_id + notebook_path)."
+                )
 
-        if notebook_ids:
+        if legacy_notebook_ids:
             found = set(
                 await self.session.scalars(
-                    select(Notebook.id).where(Notebook.id.in_(notebook_ids))
+                    select(Notebook.id).where(Notebook.id.in_(legacy_notebook_ids))
                 )
             )
-            missing = notebook_ids - found
+            missing = legacy_notebook_ids - found
             if missing:
                 raise DomainValidationError(
                     f"Notebook(s) inexistente(s): {sorted(str(m) for m in missing)}."
                 )
+
+    async def _validate_workspace_notebook(
+        self, task_name: str, workspace_id: uuid.UUID, notebook_path: str
+    ) -> None:
+        if not is_ipynb(notebook_path):
+            raise DomainValidationError(
+                f"Tarefa '{task_name}': o caminho deve apontar para um .ipynb."
+            )
+        try:
+            await WorkspaceService(self.session).get_active(workspace_id)
+        except NotFoundError as exc:
+            raise DomainValidationError(f"Tarefa '{task_name}': Workspace não encontrado.") from exc
+        settings = get_settings()
+        fs = WorkspaceFsService(
+            WorkspaceService(self.session).root_for(workspace_id),
+            max_upload_bytes=settings.workspace_max_upload_bytes,
+            max_nodes=settings.workspace_tree_max_nodes,
+            max_depth=settings.workspace_tree_max_depth,
+        )
+        try:
+            await fs.read_file(notebook_path)
+        except NotFoundError as exc:
+            raise DomainValidationError(
+                f"Tarefa '{task_name}': notebook não encontrado no Workspace ({notebook_path})."
+            ) from exc
 
     async def _upsert_tasks(
         self,
@@ -188,6 +219,8 @@ def _apply(row: WorkflowTask, task: WorkflowTaskInput) -> None:
     row.name = task.name
     row.type = task.type
     row.notebook_id = task.notebook_id
+    row.workspace_id = task.workspace_id
+    row.notebook_path = task.notebook_path
     row.parameters = task.parameters
     row.timeout_s = task.timeout_s
     row.max_retries = task.max_retries

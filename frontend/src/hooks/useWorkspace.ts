@@ -81,6 +81,12 @@ function invalidateTree(qc: ReturnType<typeof useQueryClient>, id: string) {
   void qc.invalidateQueries({ queryKey: ["workspaces", id, "tree"] });
 }
 
+/** Invalida árvore + todos os conteúdos de arquivo em cache (rename/delete/move). */
+function invalidateWorkspace(qc: ReturnType<typeof useQueryClient>, id: string) {
+  void qc.invalidateQueries({ queryKey: ["workspaces", id, "tree"] });
+  void qc.invalidateQueries({ queryKey: ["workspaces", id, "file"] });
+}
+
 export function useWriteFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -115,7 +121,7 @@ export function useDeleteEntry(id: string) {
   return useMutation({
     mutationFn: ({ path, recursive }: { path: string; recursive?: boolean }) =>
       deleteEntry(id, path, recursive),
-    onSuccess: () => invalidateTree(qc, id),
+    onSuccess: () => invalidateWorkspace(qc, id),
   });
 }
 
@@ -123,7 +129,7 @@ export function useRenameEntry(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ from, to }: { from: string; to: string }) => renameEntry(id, from, to),
-    onSuccess: () => invalidateTree(qc, id),
+    onSuccess: () => invalidateWorkspace(qc, id),
   });
 }
 

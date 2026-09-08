@@ -39,7 +39,9 @@ class WorkflowTaskInput(BaseModel):
     key: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=200)
     type: TaskType = TaskType.NOTEBOOK
-    notebook_id: uuid.UUID | None = None
+    notebook_id: uuid.UUID | None = None  # legado
+    workspace_id: uuid.UUID | None = None
+    notebook_path: str | None = Field(default=None, max_length=1024)
     parameters: dict[str, Any] = Field(default_factory=dict)
     timeout_s: int | None = Field(default=None, ge=1)
     max_retries: int = Field(default=0, ge=0, le=20)
@@ -64,6 +66,8 @@ class WorkflowTaskRead(BaseModel):
     name: str
     type: TaskType
     notebook_id: uuid.UUID | None
+    workspace_id: uuid.UUID | None = None
+    notebook_path: str | None = None
     parameters: dict[str, Any]
     timeout_s: int | None
     max_retries: int

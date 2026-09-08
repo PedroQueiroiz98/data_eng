@@ -18,9 +18,7 @@ def make_event(event_type: str, **data: Any) -> dict[str, Any]:
     return {"type": event_type, **data}
 
 
-async def publish_execution_event(
-    redis: Redis, execution_id: str, event: dict[str, Any]
-) -> None:
+async def publish_execution_event(redis: Redis, execution_id: str, event: dict[str, Any]) -> None:
     channel = get_settings().exec_event_channel(execution_id)
     await redis.publish(channel, json.dumps(event, default=str))
 
@@ -30,9 +28,7 @@ async def publish_job_event(redis: Redis, job_id: str, event: dict[str, Any]) ->
     await redis.publish(channel, json.dumps(event, default=str))
 
 
-async def publish_kernel_event(
-    redis: Redis, session_id: str, event: dict[str, Any]
-) -> None:
+async def publish_kernel_event(redis: Redis, session_id: str, event: dict[str, Any]) -> None:
     channel = get_settings().kernel_event_channel(session_id)
     await redis.publish(channel, json.dumps(event, default=str))
 

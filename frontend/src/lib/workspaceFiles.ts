@@ -71,3 +71,19 @@ export function duplicateName(name: string): string {
   if (i <= 0) return `${name} copy`;
   return `${name.slice(0, i)} copy${name.slice(i)}`;
 }
+
+/**
+ * Caminho relativo de `fromPath` (arquivo) para `toPath` (arquivo), ambos
+ * relativos à raiz do Workspace. Ex.: notebooks/x.ipynb → data/y.csv = "../data/y.csv".
+ */
+export function relativeFrom(fromPath: string, toPath: string): string {
+  const from = dirName(fromPath).split("/").filter(Boolean);
+  const to = toPath.split("/").filter(Boolean);
+  let i = 0;
+  while (i < from.length && i < to.length - 1 && from[i] === to[i]) i++;
+  const ups = from.slice(i).map(() => "..");
+  const down = to.slice(i);
+  const parts = [...ups, ...down];
+  return parts.length ? parts.join("/") : `./${to[to.length - 1] ?? ""}`;
+}
+

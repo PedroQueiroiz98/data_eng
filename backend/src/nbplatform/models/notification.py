@@ -43,9 +43,7 @@ class NotificationProvider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Enum(NotificationProviderType, native_enum=False, length=20), nullable=False
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    configuration_json: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, default=dict, nullable=False
-    )
+    configuration_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     secret_ct: Mapped[str | None] = mapped_column(Text)  # Fernet ciphertext
 
 
@@ -57,9 +55,7 @@ class NotificationDelivery(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     """
 
     __tablename__ = "notification_deliveries"
-    __table_args__ = (
-        UniqueConstraint("dedupe_key", name="uq_notification_delivery_dedupe"),
-    )
+    __table_args__ = (UniqueConstraint("dedupe_key", name="uq_notification_delivery_dedupe"),)
 
     notification_provider_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("notification_providers.id", ondelete="SET NULL"), index=True

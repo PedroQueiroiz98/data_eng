@@ -31,7 +31,7 @@ export interface FileTreeCallbacks {
   onDuplicate: (node: FileNode) => void;
   onDelete: (node: FileNode) => void;
   onDownload: (node: FileNode) => void;
-  onCopyPath: (node: FileNode, relative: boolean) => void;
+  onCopyPath: (node: FileNode, kind: CopyKind) => void;
   onRun: (node: FileNode) => void;
   onExport: (node: FileNode) => void;
   onMoveDrop: (srcPath: string, destDir: string) => void;
@@ -49,7 +49,26 @@ interface Props extends FileTreeCallbacks {
 
 const DND_MIME = "application/x-nbp-path";
 
+export type CopyKind = "path" | "relative" | "repo" | "read-example";
+
 const isNotebook = (path: string): boolean => kindFromPath(path) === "notebook";
+
+const DATA_EXT = /\.(csv|tsv|parquet|json|xlsx|txt)$/i;
+
+function copyEntries(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
+  const out: ContextMenuEntry[] = [
+    { label: "Copiar caminho", onClick: () => cb.onCopyPath(node, "path") },
+    { label: "Copiar caminho relativo", onClick: () => cb.onCopyPath(node, "relative") },
+    { label: "Copiar caminho do repositório", onClick: () => cb.onCopyPath(node, "repo") },
+  ];
+  if (node.type === "file" && DATA_EXT.test(node.path)) {
+    out.push({
+      label: "Copiar exemplo de leitura",
+      onClick: () => cb.onCopyPath(node, "read-example"),
+    });
+  }
+  return out;
+}
 
 function entriesFor(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
   const i = (Icon: typeof FileIcon) => <Icon className="h-4 w-4" />;
@@ -60,8 +79,7 @@ function entriesFor(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
       { label: "Nova pasta", icon: i(FolderPlusIcon), onClick: () => cb.onNewFolder(node.path) },
       { label: "Enviar arquivo", icon: i(UploadIcon), onClick: () => cb.onUpload(node.path) },
       "separator",
-      { label: "Copiar caminho", onClick: () => cb.onCopyPath(node, false) },
-      { label: "Copiar caminho relativo", onClick: () => cb.onCopyPath(node, true) },
+      ...copyEntries(node, cb),
       "separator",
       { label: "Renomear", icon: i(EditIcon), onClick: () => cb.onRename(node) },
       { label: "Mover", onClick: () => cb.onMove(node) },
@@ -79,8 +97,7 @@ function entriesFor(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
       { label: "Executar", icon: i(RunIcon), onClick: () => cb.onRun(node) },
       { label: "Exportar", icon: i(DownloadIcon), onClick: () => cb.onExport(node) },
       "separator",
-      { label: "Copiar caminho", onClick: () => cb.onCopyPath(node, false) },
-      { label: "Copiar caminho relativo", onClick: () => cb.onCopyPath(node, true) },
+      ...copyEntries(node, cb),
       "separator",
       { label: "Renomear", icon: i(EditIcon), onClick: () => cb.onRename(node) },
       { label: "Duplicar", icon: i(DuplicateIcon), onClick: () => cb.onDuplicate(node) },
@@ -90,8 +107,7 @@ function entriesFor(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
   return [
     ...common,
     "separator",
-    { label: "Copiar caminho", onClick: () => cb.onCopyPath(node, false) },
-    { label: "Copiar caminho relativo", onClick: () => cb.onCopyPath(node, true) },
+    ...copyEntries(node, cb),
     "separator",
     { label: "Renomear", icon: i(EditIcon), onClick: () => cb.onRename(node) },
     { label: "Mover", onClick: () => cb.onMove(node) },

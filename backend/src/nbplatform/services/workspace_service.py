@@ -133,25 +133,16 @@ class WorkspaceService:
             and role != WorkspaceRole.OWNER
             and await self.repo.count_owners(workspace_id) <= 1
         ):
-            raise DomainValidationError(
-                "O Workspace precisa de ao menos um OWNER."
-            )
+            raise DomainValidationError("O Workspace precisa de ao menos um OWNER.")
         return await self.repo.upsert_member(workspace_id, user_id, role)
 
-    async def remove_member(
-        self, workspace_id: uuid.UUID, user_id: uuid.UUID
-    ) -> None:
+    async def remove_member(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
         await self.get(workspace_id)
         member = await self.repo.get_member(workspace_id, user_id)
         if member is None:
             raise NotFoundError("Membro não encontrado neste Workspace.")
-        if (
-            member.role == WorkspaceRole.OWNER
-            and await self.repo.count_owners(workspace_id) <= 1
-        ):
-            raise DomainValidationError(
-                "Não é possível remover o único OWNER do Workspace."
-            )
+        if member.role == WorkspaceRole.OWNER and await self.repo.count_owners(workspace_id) <= 1:
+            raise DomainValidationError("Não é possível remover o único OWNER do Workspace.")
         await self.repo.remove_member(member)
 
     async def update(
@@ -187,9 +178,7 @@ class WorkspaceService:
             .select_from(Execution)
             .where(
                 Execution.workspace_id == workspace_id,
-                Execution.status.in_(
-                    [ExecutionStatus.QUEUED, ExecutionStatus.RUNNING]
-                ),
+                Execution.status.in_([ExecutionStatus.QUEUED, ExecutionStatus.RUNNING]),
             )
         )
         if active:
@@ -218,9 +207,7 @@ def _provision_tree(
     meta = build_workspace_json(
         workspace_id=workspace_id, name=name, slug=slug, created_at=created_at
     )
-    (root / ".workspace" / "workspace.json").write_text(
-        dump_workspace_json(meta), encoding="utf-8"
-    )
+    (root / ".workspace" / "workspace.json").write_text(dump_workspace_json(meta), encoding="utf-8")
 
 
 def _rmtree_silent(path: Path) -> None:

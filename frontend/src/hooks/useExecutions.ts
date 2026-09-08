@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelExecution,
   deleteExecution,
-  executeNotebook,
   getExecution,
   getExecutionOutput,
   listExecutions,
@@ -38,15 +37,6 @@ export function useExecutionOutput(id: string, enabled: boolean) {
     queryFn: () => getExecutionOutput(id),
     enabled,
     retry: false,
-  });
-}
-
-export function useExecuteNotebook(notebookId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { parameters?: Record<string, unknown> }) =>
-      executeNotebook(notebookId, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }
 

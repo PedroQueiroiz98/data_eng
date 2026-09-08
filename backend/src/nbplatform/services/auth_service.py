@@ -36,14 +36,10 @@ class AuthService:
     async def get_user(self, user_id: uuid.UUID) -> User | None:
         return await self.repo.get(user_id)
 
-    async def register(
-        self, *, email: str, name: str, password: str, role: str = "member"
-    ) -> User:
+    async def register(self, *, email: str, name: str, password: str, role: str = "member") -> User:
         email = email.lower().strip()
         if await self.repo.get_by_email(email) is not None:
             raise DomainError("E-mail já cadastrado.")
-        user = User(
-            email=email, name=name, password_hash=hash_password(password), role=role
-        )
+        user = User(email=email, name=name, password_hash=hash_password(password), role=role)
         await self.repo.add(user)
         return user

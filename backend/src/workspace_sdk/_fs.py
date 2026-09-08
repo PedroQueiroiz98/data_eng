@@ -56,9 +56,7 @@ class Workspace:
         base = _root() if not rel else _resolve(rel)
         if not base.is_dir():
             raise WorkspaceSdkError(f"Não é um diretório: {rel or '/'}")
-        return sorted(
-            p.relative_to(_root()).as_posix() for p in base.iterdir()
-        )
+        return sorted(p.relative_to(_root()).as_posix() for p in base.iterdir())
 
     def open(self, rel: str, mode: str = "r", **kw: Any) -> IO[Any]:
         target = _resolve(rel)

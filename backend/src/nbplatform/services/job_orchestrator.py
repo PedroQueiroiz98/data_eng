@@ -98,9 +98,7 @@ class JobOrchestrator:
             deps_of = _deps_of(edges)
             ready = [wtid for wtid in wtask_by_id if not deps_of[wtid]]
             for wtid in ready:
-                exec_id = await self._launch_task(
-                    session, job, job_tasks[wtid], wtask_by_id[wtid]
-                )
+                exec_id = await self._launch_task(session, job, job_tasks[wtid], wtask_by_id[wtid])
                 if exec_id:
                     to_enqueue.append(str(exec_id))
 
@@ -151,9 +149,7 @@ class JobOrchestrator:
                     jt.error_message = ex.error_message
                     jt.attempt = ex.attempt
                     name = wtask_by_id[jt.workflow_task_id].name
-                    await self._log(
-                        session, job_id, jt.id, f"tarefa '{name}' → {jt.status.value}"
-                    )
+                    await self._log(session, job_id, jt.id, f"tarefa '{name}' → {jt.status.value}")
 
             # 2) cancelamento: pendências viram CANCELLED, running recebe sinal
             if cancelling:
@@ -166,14 +162,8 @@ class JobOrchestrator:
                         await self.queue.request_cancel(str(jt.execution_id))
 
             # 3) avança: SKIPPED se dep falhou; lança se prontas
-            completed = {
-                w for w, jt in jt_by_wtid.items() if jt.status == JobTaskStatus.SUCCESS
-            }
-            blocked = {
-                w
-                for w, jt in jt_by_wtid.items()
-                if jt.status in JOBTASK_BLOCKING_FAILURE
-            }
+            completed = {w for w, jt in jt_by_wtid.items() if jt.status == JobTaskStatus.SUCCESS}
+            blocked = {w for w, jt in jt_by_wtid.items() if jt.status in JOBTASK_BLOCKING_FAILURE}
             if not cancelling:
                 progressed = True
                 while progressed:
@@ -189,21 +179,19 @@ class JobOrchestrator:
                             progressed = True
                             name = wtask_by_id[wtid].name
                             await self._log(
-                                session, job_id, jt.id,
+                                session,
+                                job_id,
+                                jt.id,
                                 f"tarefa '{name}' → SKIPPED (dependência falhou)",
                             )
                         elif preds <= completed:
-                            exec_id = await self._launch_task(
-                                session, job, jt, wtask_by_id[wtid]
-                            )
+                            exec_id = await self._launch_task(session, job, jt, wtask_by_id[wtid])
                             if exec_id:
                                 to_enqueue.append(str(exec_id))
 
             # 4) finaliza?
             if all(jt.status in JOBTASK_TERMINAL for jt in tasks):
-                if cancelling or any(
-                    jt.status == JobTaskStatus.CANCELLED for jt in tasks
-                ):
+                if cancelling or any(jt.status == JobTaskStatus.CANCELLED for jt in tasks):
                     final_status = JobStatus.CANCELLED
                 elif all(jt.status == JobTaskStatus.SUCCESS for jt in tasks):
                     final_status = JobStatus.SUCCESS
@@ -216,9 +204,7 @@ class JobOrchestrator:
         await self._publish(job_id, make_event("progress"))
         if final_status is not None:
             await self.queue.redis.delete(self.settings.job_cancel_key(str(job_id)))
-            await self._publish(
-                job_id, make_event("status_changed", status=final_status)
-            )
+            await self._publish(job_id, make_event("status_changed", status=final_status))
             await self._notify_final(job_id, final_status)
         return final_status
 
@@ -267,33 +253,51 @@ class JobOrchestrator:
                     )
                 )
         except Exception:  # noqa: BLE001 - notificação nunca altera o resultado do Job
-            logger.exception(
-                "falha ao acionar notificações", extra={"job_id": str(job_id)}
-            )
+            logger.exception("falha ao acionar notificações", extra={"job_id": str(job_id)})
 
     # ── helpers ────────────────────────────────────────────────────────────
     async def _launch_task(
         self, session: Any, job: Job, jt: JobTask, wtask: Any
     ) -> uuid.UUID | None:
-        version_id = await NotebookRepository(session).current_version_id(
-            wtask.notebook_id
-        )
-        if version_id is None:
-            jt.status = JobTaskStatus.FAILED
-            jt.finished_at = _now()
-            jt.error_message = "notebook da tarefa não encontrado"
-            await self._log(
-                session, job.id, jt.id, f"tarefa '{wtask.name}' → FAILED (sem notebook)"
-            )
-            return None
-
         params = {**(wtask.parameters or {}), **(job.parameters or {})}
-        execution = await ExecutionService(session).create_raw(
-            version_id,
-            parameters=params,
-            retry_policy=wtask.retry_policy or None,
-            timeout_s=wtask.timeout_s,
-        )
+
+        if getattr(wtask, "workspace_id", None) and getattr(wtask, "notebook_path", None):
+            # Notebook = arquivo do Workspace (source=WORKSPACE, Papermill lê do disco)
+            try:
+                execution, _ = await ExecutionService(session).create_for_workspace(
+                    wtask.workspace_id,
+                    wtask.notebook_path,
+                    parameters=params,
+                    retry_policy=wtask.retry_policy or None,
+                    timeout_s=wtask.timeout_s,
+                )
+            except Exception as exc:  # noqa: BLE001
+                jt.status = JobTaskStatus.FAILED
+                jt.finished_at = _now()
+                jt.error_message = f"notebook do Workspace indisponível: {exc}"
+                await self._log(session, job.id, jt.id, f"tarefa '{wtask.name}' → FAILED ({exc})")
+                return None
+        else:
+            # Legado: notebook do módulo global
+            version_id = await NotebookRepository(session).current_version_id(wtask.notebook_id)
+            if version_id is None:
+                jt.status = JobTaskStatus.FAILED
+                jt.finished_at = _now()
+                jt.error_message = "notebook da tarefa não encontrado"
+                await self._log(
+                    session,
+                    job.id,
+                    jt.id,
+                    f"tarefa '{wtask.name}' → FAILED (sem notebook)",
+                )
+                return None
+            execution = await ExecutionService(session).create_raw(
+                version_id,
+                parameters=params,
+                retry_policy=wtask.retry_policy or None,
+                timeout_s=wtask.timeout_s,
+            )
+
         jt.execution_id = execution.id
         jt.status = JobTaskStatus.QUEUED
         jt.attempt = 1
@@ -308,9 +312,7 @@ class JobOrchestrator:
         job.status = status
         job.finished_at = _now()
         if job.started_at is not None:
-            job.duration_ms = int(
-                (job.finished_at - job.started_at).total_seconds() * 1000
-            )
+            job.duration_ms = int((job.finished_at - job.started_at).total_seconds() * 1000)
         await self._log(session, job.id, None, f"job finalizado: {status.value}")
         await session.flush()
 
@@ -340,9 +342,7 @@ class JobOrchestrator:
         )
 
     async def _is_cancelling(self, job_id: uuid.UUID) -> bool:
-        return bool(
-            await self.redis.exists(self.settings.job_cancel_key(str(job_id)))
-        )
+        return bool(await self.redis.exists(self.settings.job_cancel_key(str(job_id))))
 
     async def _publish(self, job_id: uuid.UUID, event: dict[str, Any]) -> None:
         try:

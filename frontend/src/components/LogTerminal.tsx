@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { copyText } from "@/lib/clipboard";
 import { IconButton } from "@/ui/IconButton";
 import { useToast } from "@/ui/Toast";
 import { DownloadIcon, DuplicateIcon, MaximizeIcon, MinimizeIcon } from "@/ui/icons";
@@ -125,7 +126,7 @@ export function LogTerminal({
             size="sm"
             icon={<DuplicateIcon className="h-4 w-4" />}
             onClick={() => {
-              void navigator.clipboard?.writeText(asText());
+              void copyText(asText());
               toast.success("Logs copiados");
             }}
           />

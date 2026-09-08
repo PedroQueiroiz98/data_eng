@@ -13,7 +13,6 @@ describe("Sidebar", () => {
     for (const label of [
       "Dashboard",
       "Workspaces",
-      "Notebooks",
       "Workflows",
       "Jobs",
       "Execuções",

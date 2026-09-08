@@ -38,9 +38,7 @@ class NotificationStatus(StrEnum):
     FAILED = "FAILED"
 
 
-def idempotency_key(
-    scope_id: str, provider_id: str, event_type: NotificationEventType
-) -> str:
+def idempotency_key(scope_id: str, provider_id: str, event_type: NotificationEventType) -> str:
     """Ex.: `1842 + <provider-uuid> + JOB_FAILED` — evita envio duplicado.
 
     `scope_id` = `execution_id` quando existir, senão `job_id`.

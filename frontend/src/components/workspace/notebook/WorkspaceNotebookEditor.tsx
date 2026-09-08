@@ -1,13 +1,25 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import type * as monacoNS from "monaco-editor";
 import { useTheme } from "@/components/ThemeProvider";
+import { CreateWorkflowDialog } from "@/components/workspace/CreateWorkflowDialog";
+import { LocationsPanel } from "@/components/notebook/LocationsPanel";
+import { ProblemsPanel } from "@/components/notebook/ProblemsPanel";
 import { WorkspaceCell } from "@/components/workspace/notebook/WorkspaceCell";
 import { useAutosave } from "@/hooks/useAutosave";
 import { useHotkeys } from "@/hooks/useHotkeys";
 import { useKernel } from "@/hooks/useKernel";
-import { useWorkspaceFile, useWriteFile } from "@/hooks/useWorkspace";
+import { useWorkspaceFile, useWorkspaceTree, useWriteFile } from "@/hooks/useWorkspace";
+import { useEditorConfig } from "@/lib/editorConfig";
 import type { KernelEvent } from "@/lib/kernels";
+import { lspDiagnostics, type LspDiagnostic, type LspLocation } from "@/lib/lsp";
+import { wsCellModelPath } from "@/lib/lspShared";
+import { setLspDoc } from "@/lib/monacoProviders";
+import { setWorkspaceFsContext } from "@/lib/monacoProviders";
 import type { NotebookContent } from "@/lib/notebooks";
+import type { FileNode } from "@/lib/workspace";
 import { downloadExport } from "@/lib/workspaceData";
+import { relativeFrom } from "@/lib/workspaceFiles";
 import { useWorkspaceStore } from "@/store/workspace";
 import { useWorkspaceRuntime } from "@/store/workspaceRuntime";
 import {
@@ -52,6 +64,8 @@ export function WorkspaceNotebookEditor({
 }: Props) {
   const { theme } = useTheme();
   const toast = useToast();
+  const navigate = useNavigate();
+  const [wfDialog, setWfDialog] = useState(false);
   const file = useWorkspaceFile(workspaceId, path);
   const write = useWriteFile(workspaceId);
   const autosave = useWorkspaceStore((s) => s.autosave);
@@ -66,6 +80,45 @@ export function WorkspaceNotebookEditor({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [focusedCell, setFocusedCell] = useState<string | null>(null);
   const [runAll, setRunAll] = useState<{ done: number; total: number } | null>(null);
+
+  // ── LSP (autocomplete/diagnostics/go-to-def) ───────────────────────────────
+  const editorsRef = useRef<
+    Map<number, monacoNS.editor.IStandaloneCodeEditor>
+  >(new Map());
+  const [diags, setDiags] = useState<LspDiagnostic[]>([]);
+  const [locPanel, setLocPanel] = useState<{
+    title: string;
+    locations: LspLocation[];
+  } | null>(null);
+  const [showProblems, setShowProblems] = useState(false);
+  const diagnosticsEnabled = useEditorConfig((s) => s.config.editor.diagnostics);
+  const tree = useWorkspaceTree(workspaceId);
+
+  const lspCtx = useCallback(
+    () => ({ workspaceId, notebookPath: path }),
+    [workspaceId, path],
+  );
+
+  const navigateToCell = useCallback(
+    (cellIndex: number, line: number, column: number) => {
+      const ed = editorsRef.current.get(cellIndex);
+      if (!ed) return;
+      ed.getContainerDomNode()?.scrollIntoView({ block: "center", behavior: "smooth" });
+      ed.setPosition({ lineNumber: line + 1, column: column + 1 });
+      ed.revealPositionInCenter({ lineNumber: line + 1, column: column + 1 });
+      ed.focus();
+      setLocPanel(null);
+    },
+    [],
+  );
+
+  const registerEditor = useCallback(
+    (i: number, ed: monacoNS.editor.IStandaloneCodeEditor | null) => {
+      if (ed) editorsRef.current.set(i, ed);
+      else editorsRef.current.delete(i);
+    },
+    [],
+  );
 
   // ── carregar o arquivo uma vez ─────────────────────────────────────────────
   const loadedFor = useRef<string | null>(null);
@@ -119,6 +172,77 @@ export function WorkspaceNotebookEditor({
       useWorkspaceRuntime.getState().setKernel(kernel.status, kernel.connected);
     }
   }, [active, kernel.status, kernel.connected]);
+
+  // publica o "documento lógico" para os providers do Monaco (só a aba ativa)
+  const cellIds = state.cells.map((c) => c.id).join(",");
+  useEffect(() => {
+    if (!active) return;
+    setLspDoc({
+      cellUris: stateRef.current.cells.map((c) =>
+        wsCellModelPath(workspaceId, path, c.id),
+      ),
+      getCells: () => stateRef.current.cells.map((c) => c.source),
+      navigate: navigateToCell,
+      workspaceId,
+      notebookPath: path,
+    });
+    return () => setLspDoc(null);
+  }, [active, cellIds, workspaceId, path, navigateToCell]);
+
+  // contexto de arquivos do Workspace p/ completion de caminhos em strings
+  useEffect(() => {
+    if (!active) return;
+    setWorkspaceFsContext({
+      listRelPaths: () => {
+        const files: string[] = [];
+        const walk = (n: FileNode): void => {
+          for (const c of n.children ?? []) {
+            if (c.type === "dir") walk(c);
+            else files.push(c.path);
+          }
+        };
+        if (tree.data) walk(tree.data);
+        return files.map((rel) => relativeFrom(path, rel));
+      },
+    });
+    return () => setWorkspaceFsContext(null);
+  }, [active, tree.data, path]);
+
+  // diagnósticos (debounce 500ms)
+  const cellsKey = state.cells.map((c) => c.source).join(" ");
+  useEffect(() => {
+    if (!active || !diagnosticsEnabled) {
+      setDiags([]);
+      return;
+    }
+    const h = setTimeout(() => {
+      void lspDiagnostics(
+        stateRef.current.cells.map((c) => c.source),
+        { workspaceId, notebookPath: path },
+      ).then((r) => {
+        if (r.ok) setDiags(r.items);
+      });
+    }, 500);
+    return () => clearTimeout(h);
+  }, [active, cellsKey, diagnosticsEnabled, workspaceId, path]);
+
+  const diagByCell = useMemo(() => {
+    const m = new Map<number, LspDiagnostic[]>();
+    for (const d of diags) {
+      const arr = m.get(d.cell_index) ?? [];
+      arr.push(d);
+      m.set(d.cell_index, arr);
+    }
+    return m;
+  }, [diags]);
+
+  const problems = useMemo(
+    () => ({
+      errors: diags.filter((d) => d.severity === "error").length,
+      warnings: diags.filter((d) => d.severity === "warning").length,
+    }),
+    [diags],
+  );
 
   // ── salvar ────────────────────────────────────────────────────────────────
   const save = useCallback(async () => {
@@ -217,6 +341,7 @@ export function WorkspaceNotebookEditor({
       else if (cmd === "interrupt-kernel") kernel.interrupt();
       else if (cmd === "save") void save();
       else if (cmd === "clear-outputs") dispatch({ type: "clearOutputs" });
+      else if (cmd === "create-workflow") setWfDialog(true);
     };
     window.addEventListener("nbp:workspace-command", onCmd as EventListener);
     return () =>
@@ -312,6 +437,9 @@ export function WorkspaceNotebookEditor({
         >
           Limpar saídas
         </Button>
+        <Button size="sm" variant="text" onClick={() => setWfDialog(true)}>
+          Criar Workflow
+        </Button>
 
         <span className="ml-auto flex items-center gap-2 text-xs text-fg-muted">
           <button
@@ -370,9 +498,14 @@ export function WorkspaceNotebookEditor({
             index={i}
             total={state.cells.length}
             theme={theme}
-            modelPath={`wsnb:${workspaceId}:${path}:${cell.id}.${
-              cell.cell_type === "code" ? "py" : "md"
-            }`}
+            modelPath={
+              cell.cell_type === "code"
+                ? wsCellModelPath(workspaceId, path, cell.id)
+                : `file:///wsnb-md/${workspaceId}/${cell.id}.md`
+            }
+            diagnostics={diagByCell.get(i)}
+            getCells={() => stateRef.current.cells.map((c) => c.source)}
+            lspCtx={lspCtx}
             onSource={(id, src) => dispatch({ type: "setSource", id, source: src })}
             onType={(id, t) => dispatch({ type: "setType", id, cellType: t })}
             onRun={(id) => void runCell(id)}
@@ -382,6 +515,9 @@ export function WorkspaceNotebookEditor({
             onRemove={(id) => dispatch({ type: "remove", id })}
             onAddBelow={(id) => dispatch({ type: "add", afterId: id, cellType: "code" })}
             onFocusCell={setFocusedCell}
+            onRegisterEditor={registerEditor}
+            onNavigate={navigateToCell}
+            onShowLocations={(title, locations) => setLocPanel({ title, locations })}
           />
         ))}
         {state.cells.length === 0 && (
@@ -393,7 +529,40 @@ export function WorkspaceNotebookEditor({
             + Adicionar célula
           </button>
         )}
+
+        {(problems.errors > 0 || problems.warnings > 0) && (
+          <button
+            type="button"
+            onClick={() => setShowProblems((v) => !v)}
+            className="text-xs text-fg-muted hover:text-fg"
+          >
+            {problems.errors} erro(s) · {problems.warnings} aviso(s)
+          </button>
+        )}
+        {showProblems && (
+          <ProblemsPanel
+            diagnostics={diags}
+            onSelect={navigateToCell}
+            onClose={() => setShowProblems(false)}
+          />
+        )}
+        {locPanel && (
+          <LocationsPanel
+            title={locPanel.title}
+            locations={locPanel.locations}
+            onSelect={navigateToCell}
+            onClose={() => setLocPanel(null)}
+          />
+        )}
       </div>
+
+      <CreateWorkflowDialog
+        open={wfDialog}
+        workspaceId={workspaceId}
+        notebookPath={path}
+        onClose={() => setWfDialog(false)}
+        onCreated={(wid) => navigate(`/workflows/${wid}`)}
+      />
     </div>
   );
 }

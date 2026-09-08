@@ -99,9 +99,7 @@ class WorkspaceRepository:
     ) -> WorkspaceMember:
         member = await self.get_member(workspace_id, user_id)
         if member is None:
-            member = WorkspaceMember(
-                workspace_id=workspace_id, user_id=user_id, role=role
-            )
+            member = WorkspaceMember(workspace_id=workspace_id, user_id=user_id, role=role)
             self.session.add(member)
         else:
             member.role = role

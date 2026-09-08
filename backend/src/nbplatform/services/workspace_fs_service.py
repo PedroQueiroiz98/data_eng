@@ -92,9 +92,7 @@ class WorkspaceFsService:
             if level >= max_depth:
                 return []
             out: list[FileNode] = []
-            for entry in sorted(
-                os.scandir(d), key=lambda e: (not e.is_dir(), e.name.lower())
-            ):
+            for entry in sorted(os.scandir(d), key=lambda e: (not e.is_dir(), e.name.lower())):
                 if d == self.root and entry.name == INTERNAL_DIR:
                     continue
                 counter[0] += 1
@@ -153,9 +151,7 @@ class WorkspaceFsService:
             return FileContent(path=rel, kind="binary", content=None, etag=etag)
         if is_ipynb(rel):
             try:
-                return FileContent(
-                    path=rel, kind="notebook", content=json.loads(text), etag=etag
-                )
+                return FileContent(path=rel, kind="notebook", content=json.loads(text), etag=etag)
             except json.JSONDecodeError:
                 return FileContent(path=rel, kind="text", content=text, etag=etag)
         return FileContent(path=rel, kind="text", content=text, etag=etag)
@@ -169,9 +165,7 @@ class WorkspaceFsService:
         notebook: dict[str, Any] | None,
         if_match: str | None = None,
     ) -> FileContent:
-        return await asyncio.to_thread(
-            self._write_file_sync, rel_path, text, notebook, if_match
-        )
+        return await asyncio.to_thread(self._write_file_sync, rel_path, text, notebook, if_match)
 
     def _write_file_sync(
         self,
@@ -230,9 +224,7 @@ class WorkspaceFsService:
             raise NotFoundError(f"Caminho não encontrado: {rel_path}")
         if target.is_dir():
             if not recursive and any(target.iterdir()):
-                raise ConflictError(
-                    f"Diretório {rel_path} não está vazio (use recursive=true)."
-                )
+                raise ConflictError(f"Diretório {rel_path} não está vazio (use recursive=true).")
             shutil.rmtree(target)
         else:
             target.unlink()
@@ -302,9 +294,7 @@ class WorkspaceFsService:
         """Retorna (fonte, nome_sugerido, is_zip)."""
         return await asyncio.to_thread(self._open_download_sync, rel_path)
 
-    def _open_download_sync(
-        self, rel_path: str
-    ) -> tuple[Path | io.BytesIO, str, bool]:
+    def _open_download_sync(self, rel_path: str) -> tuple[Path | io.BytesIO, str, bool]:
         target = resolve_within(self.root, rel_path)
         if not target.exists():
             raise NotFoundError(f"Caminho não encontrado: {rel_path}")
@@ -319,9 +309,7 @@ class WorkspaceFsService:
         return buf, f"{target.name or 'workspace'}.zip", True
 
     # ── data viewer (.csv/.parquet) ─────────────────────────────────────────
-    async def read_data(
-        self, rel_path: str, *, offset: int, limit: int
-    ) -> DataPreview:
+    async def read_data(self, rel_path: str, *, offset: int, limit: int) -> DataPreview:
         return await asyncio.to_thread(self._read_data_sync, rel_path, offset, limit)
 
     def _read_data_sync(self, rel_path: str, offset: int, limit: int) -> DataPreview:
@@ -336,9 +324,7 @@ class WorkspaceFsService:
         raise DomainValidationError(f"Pré-visualização de dados não suportada para {ext}.")
 
     # ── export de notebook ──────────────────────────────────────────────────
-    async def export_notebook(
-        self, rel_path: str, fmt: str
-    ) -> tuple[bytes, str, str]:
+    async def export_notebook(self, rel_path: str, fmt: str) -> tuple[bytes, str, str]:
         return await asyncio.to_thread(self._export_notebook_sync, rel_path, fmt)
 
     def _export_notebook_sync(self, rel_path: str, fmt: str) -> tuple[bytes, str, str]:

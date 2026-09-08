@@ -87,6 +87,8 @@ class ExecutionService:
         parameters: dict[str, Any],
         source_commit: str | None = None,
         idempotency_key: str | None = None,
+        retry_policy: dict[str, Any] | None = None,
+        timeout_s: int | None = None,
     ) -> tuple[Execution, bool]:
         """Execução de um `.ipynb` que vive em disco num Workspace (source=WORKSPACE).
 
@@ -107,6 +109,8 @@ class ExecutionService:
             parameters=parameters,
             attempt=1,
             idempotency_key=idempotency_key,
+            retry_policy=retry_policy or None,
+            timeout_s=timeout_s,
         )
         await self.repo.add(execution)
         return execution, True
@@ -201,9 +205,7 @@ class ExecutionService:
         await self.session.delete(execution)
         await self.session.flush()
 
-    async def logs_since(
-        self, execution_id: uuid.UUID, *, after_seq: int
-    ) -> list[ExecutionLog]:
+    async def logs_since(self, execution_id: uuid.UUID, *, after_seq: int) -> list[ExecutionLog]:
         return await self.repo.logs_since(execution_id, after_seq=after_seq)
 
     # ── Worker: transições ───────────────────────────────────────────────────

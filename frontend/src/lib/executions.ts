@@ -62,12 +62,6 @@ export const getExecutionLogs = (id: string, afterSeq = 0): Promise<ExecutionLog
 export const getExecutionOutput = (id: string): Promise<NotebookContent> =>
   apiGet<NotebookContent>(`/executions/${id}/output`);
 
-export const executeNotebook = (
-  notebookId: string,
-  body: { parameters?: Record<string, unknown>; notebook_version_number?: number },
-): Promise<Execution> =>
-  apiPost<Execution>(`/notebooks/${notebookId}/execute`, body);
-
 export const cancelExecution = (id: string): Promise<Execution> =>
   apiPost<Execution>(`/executions/${id}/cancel`);
 

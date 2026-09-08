@@ -1,7 +1,6 @@
 /**
- * Estado local (por aba) de um notebook do Workspace. Independente do store
- * singleton `useNotebookEditor` (usado por `/notebooks/:id`) para permitir N
- * notebooks abertos ao mesmo tempo.
+ * Estado local (por aba) de um notebook do Workspace. Um `useReducer` por aba
+ * permite N notebooks abertos ao mesmo tempo.
  */
 
 import type { CellOutput, NotebookCell, NotebookContent } from "@/lib/notebooks";

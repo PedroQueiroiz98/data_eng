@@ -36,10 +36,5 @@ class AuditService:
         await self.session.flush()
 
     async def list_recent(self, *, limit: int, offset: int) -> list[AuditLog]:
-        stmt = (
-            select(AuditLog)
-            .order_by(AuditLog.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
         return list(await self.session.scalars(stmt))

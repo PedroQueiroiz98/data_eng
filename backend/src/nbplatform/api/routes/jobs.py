@@ -85,9 +85,7 @@ async def delete_job(
     await JobService(session).delete(job_id)
     settings = get_settings()
     with contextlib.suppress(Exception):
-        await redis.delete(
-            settings.job_cancel_key(str(job_id)), settings.job_seq_key(str(job_id))
-        )
+        await redis.delete(settings.job_cancel_key(str(job_id)), settings.job_seq_key(str(job_id)))
     await AuditService(session).record(
         user_id=user_id, action="DELETE_JOB", resource_type="job", resource_id=str(job_id)
     )
@@ -108,9 +106,7 @@ async def cancel_job(
     service = JobService(session)
     current = await service.get_status(job_id)  # 404
     if current not in JOB_TERMINAL:
-        await redis.set(
-            get_settings().job_cancel_key(str(job_id)), "1", ex=3600
-        )
+        await redis.set(get_settings().job_cancel_key(str(job_id)), "1", ex=3600)
         await AuditService(session).record(
             user_id=user_id, action="CANCEL_JOB", resource_type="job", resource_id=str(job_id)
         )
@@ -123,9 +119,7 @@ async def cancel_job(
 
 
 @router.post("/api/jobs/{job_id}/retry", response_model=JobRead)
-async def retry_job(
-    job_id: uuid.UUID, session: SessionDep, redis: RedisDep
-) -> JobRead:
+async def retry_job(job_id: uuid.UUID, session: SessionDep, redis: RedisDep) -> JobRead:
     service = JobService(session)
     try:
         job = await service.reset_for_retry(job_id)

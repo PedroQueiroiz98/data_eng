@@ -6,8 +6,12 @@ as rotas respondem 200 mesmo em falha do motor, com `ok=false`.
 
 from __future__ import annotations
 
+import uuid
+from pathlib import Path
+
 from fastapi import APIRouter
 
+from nbplatform.core.config import get_settings
 from nbplatform.schemas.lsp import (
     AutoImportRequest,
     AutoImportResponse,
@@ -33,6 +37,12 @@ from nbplatform.services.lsp.service import LspResult, get_lsp_service
 router = APIRouter(prefix="/api/lsp", tags=["lsp"])
 
 
+def _ws_root(workspace_id: uuid.UUID | None) -> str | None:
+    if workspace_id is None:
+        return None
+    return str(Path(get_settings().workspaces_dir) / str(workspace_id))
+
+
 @router.get("/health", response_model=LspHealthResponse)
 async def lsp_health() -> LspHealthResponse:
     return LspHealthResponse.model_validate(get_lsp_service().health())
@@ -40,7 +50,9 @@ async def lsp_health() -> LspHealthResponse:
 
 @router.post("/completions", response_model=CompletionResponse)
 async def completions(req: CompletionRequest) -> CompletionResponse:
-    r = await get_lsp_service().complete(req.cells, req.cell_index, req.line, req.column)
+    r = await get_lsp_service().complete(
+        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+    )
     return CompletionResponse(
         ok=r.ok,
         engine=r.engine,
@@ -60,7 +72,9 @@ async def completions(req: CompletionRequest) -> CompletionResponse:
 
 @router.post("/hover", response_model=HoverResponse)
 async def hover(req: HoverRequest) -> HoverResponse:
-    r = await get_lsp_service().hover(req.cells, req.cell_index, req.line, req.column)
+    r = await get_lsp_service().hover(
+        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+    )
     if not r.hover:
         return HoverResponse(ok=r.ok, took_ms=r.took_ms)
     h = r.hover
@@ -77,7 +91,9 @@ async def hover(req: HoverRequest) -> HoverResponse:
 
 @router.post("/signature", response_model=SignatureResponse)
 async def signature(req: SignatureRequest) -> SignatureResponse:
-    r = await get_lsp_service().signature(req.cells, req.cell_index, req.line, req.column)
+    r = await get_lsp_service().signature(
+        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+    )
     if not r.signature:
         return SignatureResponse(ok=r.ok, took_ms=r.took_ms)
     s = r.signature
@@ -93,13 +109,17 @@ async def signature(req: SignatureRequest) -> SignatureResponse:
 
 @router.post("/definition", response_model=LocationsResponse)
 async def definition(req: DefinitionRequest) -> LocationsResponse:
-    r = await get_lsp_service().definition(req.cells, req.cell_index, req.line, req.column)
+    r = await get_lsp_service().definition(
+        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+    )
     return _locations(r)
 
 
 @router.post("/references", response_model=LocationsResponse)
 async def references(req: ReferencesRequest) -> LocationsResponse:
-    r = await get_lsp_service().references(req.cells, req.cell_index, req.line, req.column)
+    r = await get_lsp_service().references(
+        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+    )
     return _locations(r)
 
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { copyText } from "@/lib/clipboard";
 import { CheckIcon, DuplicateIcon } from "@/ui/icons";
 
 export function CopyIconBtn({ value, label = "Copiar" }: { value: string; label?: string }) {
@@ -10,12 +11,9 @@ export function CopyIconBtn({ value, label = "Copiar" }: { value: string; label?
       className="rounded p-0.5 text-fg-faint hover:bg-surface-variant hover:text-fg"
       onClick={async (e) => {
         e.stopPropagation();
-        try {
-          await navigator.clipboard.writeText(value);
+        if (await copyText(value)) {
           setDone(true);
           setTimeout(() => setDone(false), 1200);
-        } catch {
-          /* clipboard bloqueado */
         }
       }}
     >

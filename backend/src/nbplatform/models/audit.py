@@ -17,9 +17,7 @@ class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         Index("ix_audit_user_created", "user_id", "created_at"),
     )
 
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     resource_type: Mapped[str] = mapped_column(String(100), nullable=False)
     resource_id: Mapped[str | None] = mapped_column(String(100))

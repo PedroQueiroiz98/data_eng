@@ -38,9 +38,7 @@ class WorkspaceMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "workspace_members"
     __table_args__ = (
-        UniqueConstraint(
-            "workspace_id", "user_id", name="uq_workspace_member_workspace_user"
-        ),
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member_workspace_user"),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -66,9 +64,7 @@ class WorkspaceGitRepository(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """
 
     __tablename__ = "workspace_git_repositories"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", name="uq_workspace_git_repo_workspace"),
-    )
+    __table_args__ = (UniqueConstraint("workspace_id", name="uq_workspace_git_repo_workspace"),)
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True

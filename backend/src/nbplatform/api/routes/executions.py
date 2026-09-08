@@ -1,4 +1,9 @@
-"""Endpoints de Execution (consulta) e o disparo a partir de um notebook."""
+"""Endpoints de Execution (consulta, cancel/retry/delete, logs, output).
+
+O disparo de execução vem do Workspace (`POST /api/workspaces/{id}/execute`) ou de
+Jobs/Workflows — o antigo `POST /api/notebooks/{id}/execute` foi removido junto com
+o módulo global de notebooks.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +19,6 @@ from nbplatform.domain.enums import ExecutionStatus
 from nbplatform.domain.state_machine import TERMINAL_EXECUTION_STATES
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.schemas.execution import (
-    ExecutionCreate,
     ExecutionDetail,
     ExecutionLogRead,
     ExecutionRead,
@@ -30,40 +34,6 @@ def _detail(execution: object) -> ExecutionDetail:
     detail = ExecutionDetail.model_validate(execution)
     detail.has_output = getattr(execution, "output_notebook", None) is not None
     return detail
-
-
-@router.post(
-    "/api/notebooks/{notebook_id}/execute",
-    response_model=ExecutionRead,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def execute_notebook(
-    notebook_id: uuid.UUID,
-    payload: ExecutionCreate,
-    session: SessionDep,
-    redis: RedisDep,
-    user_id: CurrentUserId,
-) -> ExecutionRead:
-    service = ExecutionService(session)
-    execution, created = await service.create_for_notebook(
-        notebook_id,
-        parameters=payload.parameters,
-        version_number=payload.notebook_version_number,
-        idempotency_key=payload.idempotency_key,
-    )
-    result = ExecutionRead.model_validate(execution)
-    if created:
-        await AuditService(session).record(
-            user_id=user_id,
-            action="EXECUTE_NOTEBOOK",
-            resource_type="execution",
-            resource_id=str(execution.id),
-            metadata={"notebook_id": str(notebook_id)},
-        )
-        # Garante o commit antes de enfileirar para o worker não perder a corrida.
-        await session.commit()
-        await ExecutionQueue(redis).enqueue(str(execution.id), attempt=1)
-    return result
 
 
 @router.post("/api/executions/{execution_id}/cancel", response_model=ExecutionRead)
@@ -131,9 +101,7 @@ async def get_execution(execution_id: uuid.UUID, session: SessionDep) -> Executi
     return _detail(await ExecutionService(session).get(execution_id))
 
 
-@router.delete(
-    "/api/executions/{execution_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/api/executions/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_execution(
     execution_id: uuid.UUID, session: SessionDep, redis: RedisDep, user_id: CurrentUserId
 ) -> None:

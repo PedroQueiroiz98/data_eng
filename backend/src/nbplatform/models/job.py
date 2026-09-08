@@ -46,9 +46,7 @@ class Job(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[int | None] = mapped_column(BigInteger)
 
-    tasks: Mapped[list[JobTask]] = relationship(
-        back_populates="job", cascade="all, delete-orphan"
-    )
+    tasks: Mapped[list[JobTask]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
 
 class JobTask(UUIDPrimaryKeyMixin, Base):

@@ -60,9 +60,7 @@ class NotificationQueue:
         return NotificationQueueMessage(notification_id=raw, raw=raw)
 
     async def ack(self, message: NotificationQueueMessage) -> None:
-        await self.redis.lrem(
-            self.settings.redis_queue_notifications_processing, 1, message.raw
-        )
+        await self.redis.lrem(self.settings.redis_queue_notifications_processing, 1, message.raw)
 
     async def reclaim_processing(self) -> int:
         """Devolve à fila principal ids presos em <processing>.

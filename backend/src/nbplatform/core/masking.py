@@ -32,7 +32,4 @@ def is_sensitive_key(name: str) -> bool:
 
 def mask_params(params: Mapping[str, Any]) -> dict[str, Any]:
     """Copia o mapa mascarando valores de chaves sensíveis (para exibição na UI)."""
-    return {
-        key: (PARAM_MASK if is_sensitive_key(key) else value)
-        for key, value in params.items()
-    }
+    return {key: (PARAM_MASK if is_sensitive_key(key) else value) for key, value in params.items()}

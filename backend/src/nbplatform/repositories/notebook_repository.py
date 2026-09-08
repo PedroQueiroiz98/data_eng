@@ -26,12 +26,7 @@ class NotebookRepository:
         return await self.session.scalar(stmt)
 
     async def list_paged(self, *, limit: int, offset: int) -> list[Notebook]:
-        stmt = (
-            select(Notebook)
-            .order_by(Notebook.updated_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(Notebook).order_by(Notebook.updated_at.desc()).limit(limit).offset(offset)
         return list(await self.session.scalars(stmt))
 
     async def delete(self, notebook: Notebook) -> None:
@@ -69,8 +64,10 @@ class NotebookRepository:
         return list(await self.session.scalars(stmt))
 
     async def count_versions(self, notebook_id: uuid.UUID) -> int:
-        stmt = select(func.count()).select_from(NotebookVersion).where(
-            NotebookVersion.notebook_id == notebook_id
+        stmt = (
+            select(func.count())
+            .select_from(NotebookVersion)
+            .where(NotebookVersion.notebook_id == notebook_id)
         )
         return int(await self.session.scalar(stmt) or 0)
 

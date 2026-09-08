@@ -76,8 +76,7 @@ async def execution_ws(websocket: WebSocket, execution_id: str) -> None:
                 "type": "snapshot",
                 "execution": detail.model_dump(mode="json"),
                 "logs": [
-                    ExecutionLogRead.model_validate(log).model_dump(mode="json")
-                    for log in logs
+                    ExecutionLogRead.model_validate(log).model_dump(mode="json") for log in logs
                 ],
             }
     except NotFoundError:
@@ -116,9 +115,7 @@ async def job_ws(websocket: WebSocket, job_id: str) -> None:
                 "type": "snapshot",
                 "job": job_json,
                 "tasks": tasks,
-                "logs": [
-                    JobLogRead.model_validate(log).model_dump(mode="json") for log in logs
-                ],
+                "logs": [JobLogRead.model_validate(log).model_dump(mode="json") for log in logs],
             }
     except NotFoundError:
         await websocket.close(code=1008)
@@ -157,8 +154,7 @@ async def kernel_ws(websocket: WebSocket, session_id: str) -> None:
                     uuid.UUID(str(meta["workspace_id"])), uuid.UUID(user_id)
                 )
             allowed = member is not None and (
-                WORKSPACE_ROLE_RANK[member.role]
-                >= WORKSPACE_ROLE_RANK[WorkspaceRole.EDITOR]
+                WORKSPACE_ROLE_RANK[member.role] >= WORKSPACE_ROLE_RANK[WorkspaceRole.EDITOR]
             )
     if not allowed:
         await websocket.close(code=1008)

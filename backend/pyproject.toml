@@ -19,6 +19,7 @@ dependencies = [
     "ipykernel>=6.29",
     "jupyter-client>=8.6",
     "nbconvert>=7.16",
+    "pandas>=2.2",
     "pyarrow>=18.0",
     "pyjwt>=2.9",
     "jedi>=0.19",

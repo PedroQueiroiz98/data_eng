@@ -29,18 +29,15 @@ async def run_due_schedule(schedule_id: str, redis: Redis) -> uuid.UUID | None:
         schedule = await repo.get_for_update(sched_uuid)
         if schedule is None or not schedule.enabled:
             return None
-        if (
-            schedule.last_run_at is not None
-            and now - schedule.last_run_at < timedelta(seconds=_MIN_INTERVAL_S)
+        if schedule.last_run_at is not None and now - schedule.last_run_at < timedelta(
+            seconds=_MIN_INTERVAL_S
         ):
             return None
 
         workflow_id = schedule.workflow_id
         parameters = dict(schedule.parameters or {})
         schedule.last_run_at = now
-        schedule.next_run_at = next_run_after(
-            schedule.cron, schedule.timezone, after=now
-        )
+        schedule.next_run_at = next_run_after(schedule.cron, schedule.timezone, after=now)
 
     try:
         job_id = await JobOrchestrator(redis).start_job(

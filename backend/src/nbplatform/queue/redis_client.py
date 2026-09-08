@@ -18,9 +18,7 @@ _client: redis.Redis | None = None
 def get_redis() -> redis.Redis:
     global _client
     if _client is None:
-        _client = redis.from_url(
-            get_settings().redis_url, encoding="utf-8", decode_responses=True
-        )
+        _client = redis.from_url(get_settings().redis_url, encoding="utf-8", decode_responses=True)
     return _client
 
 

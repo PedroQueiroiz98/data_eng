@@ -24,11 +24,7 @@ class JobRepository:
         return await self.session.get(Job, job_id)
 
     async def get_with_tasks(self, job_id: uuid.UUID) -> Job | None:
-        stmt = (
-            select(Job)
-            .where(Job.id == job_id)
-            .options(selectinload(Job.tasks))
-        )
+        stmt = select(Job).where(Job.id == job_id).options(selectinload(Job.tasks))
         return await self.session.scalar(stmt)
 
     async def get_for_update(self, job_id: uuid.UUID) -> Job | None:
@@ -43,9 +39,7 @@ class JobRepository:
         workflow_id: uuid.UUID | None = None,
         status: JobStatus | None = None,
     ) -> list[Job]:
-        stmt = (
-            select(Job).order_by(Job.created_at.desc()).options(selectinload(Job.tasks))
-        )
+        stmt = select(Job).order_by(Job.created_at.desc()).options(selectinload(Job.tasks))
         if workflow_id is not None:
             stmt = stmt.where(Job.workflow_id == workflow_id)
         if status is not None:

@@ -53,9 +53,7 @@ class ScheduleService:
             raise NotFoundError(f"Schedule {schedule_id} não encontrado.")
         return schedule
 
-    async def list_schedules(
-        self, *, workflow_id: uuid.UUID | None
-    ) -> list[Schedule]:
+    async def list_schedules(self, *, workflow_id: uuid.UUID | None) -> list[Schedule]:
         return await self.repo.list_all(workflow_id=workflow_id)
 
     async def update(
@@ -80,9 +78,7 @@ class ScheduleService:
             schedule.parameters = parameters
 
         schedule.next_run_at = (
-            next_run_after(new_cron, new_tz, after=datetime.now(UTC))
-            if schedule.enabled
-            else None
+            next_run_after(new_cron, new_tz, after=datetime.now(UTC)) if schedule.enabled else None
         )
         await self.session.flush()
         return schedule

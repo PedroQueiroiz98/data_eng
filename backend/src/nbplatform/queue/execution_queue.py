@@ -94,9 +94,7 @@ class ExecutionQueue:
         return int(await self.redis.incr(self.settings.exec_seq_key(execution_id)))
 
     # ── retry com atraso (backoff) ───────────────────────────────────────────
-    async def enqueue_delayed(
-        self, execution_id: str, *, attempt: int, ready_at: float
-    ) -> None:
+    async def enqueue_delayed(self, execution_id: str, *, attempt: int, ready_at: float) -> None:
         await self.redis.zadd(
             self.settings.redis_queue_executions_delayed,
             {_encode(execution_id, attempt): ready_at},
@@ -116,9 +114,7 @@ class ExecutionQueue:
 
     # ── cancelamento (sinal para o worker que está executando) ───────────────
     async def request_cancel(self, execution_id: str) -> None:
-        await self.redis.set(
-            self.settings.cancel_key(execution_id), "1", ex=CANCEL_TTL_S
-        )
+        await self.redis.set(self.settings.cancel_key(execution_id), "1", ex=CANCEL_TTL_S)
 
     async def is_cancel_requested(self, execution_id: str) -> bool:
         return bool(await self.redis.exists(self.settings.cancel_key(execution_id)))

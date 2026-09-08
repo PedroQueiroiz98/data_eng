@@ -110,9 +110,7 @@ async def git_create_branch(
 ) -> dict[str, str]:
     await WorkspaceService(session).get_active(workspace_id)
     await _svc(session, workspace_id).create_branch(payload.name)
-    await _audit(
-        session, access.user.id, "WORKSPACE_GIT_BRANCH", workspace_id, name=payload.name
-    )
+    await _audit(session, access.user.id, "WORKSPACE_GIT_BRANCH", workspace_id, name=payload.name)
     return {"branch": payload.name}
 
 
@@ -125,9 +123,7 @@ async def git_checkout(
 ) -> dict[str, str]:
     await WorkspaceService(session).get_active(workspace_id)
     await _svc(session, workspace_id).checkout(payload.ref)
-    await _audit(
-        session, access.user.id, "WORKSPACE_GIT_CHECKOUT", workspace_id, ref=payload.ref
-    )
+    await _audit(session, access.user.id, "WORKSPACE_GIT_CHECKOUT", workspace_id, ref=payload.ref)
     return {"ref": payload.ref}
 
 
@@ -145,9 +141,7 @@ async def git_commit(
         author_name=access.user.name or "",
         author_email=access.user.email or "",
     )
-    await _audit(
-        session, access.user.id, "WORKSPACE_GIT_COMMIT", workspace_id, sha=sha
-    )
+    await _audit(session, access.user.id, "WORKSPACE_GIT_COMMIT", workspace_id, sha=sha)
     return GitCommitResult(sha=sha)
 
 

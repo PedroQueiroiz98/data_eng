@@ -65,9 +65,7 @@ async def post_provider(
 
 
 @router.get("/providers/{provider_id}", response_model=NotificationProviderRead)
-async def get_one_provider(
-    provider_id: uuid.UUID, session: SessionDep
-) -> NotificationProviderRead:
+async def get_one_provider(provider_id: uuid.UUID, session: SessionDep) -> NotificationProviderRead:
     return await get_provider(session, provider_id)
 
 
@@ -89,9 +87,7 @@ async def put_provider(
 
 
 @router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def del_provider(
-    provider_id: uuid.UUID, session: SessionDep, admin: AdminUser
-) -> None:
+async def del_provider(provider_id: uuid.UUID, session: SessionDep, admin: AdminUser) -> None:
     await delete_provider(session, provider_id)
     await AuditService(session).record(
         user_id=admin.id,
@@ -101,9 +97,7 @@ async def del_provider(
     )
 
 
-@router.patch(
-    "/providers/{provider_id}/enabled", response_model=NotificationProviderRead
-)
+@router.patch("/providers/{provider_id}/enabled", response_model=NotificationProviderRead)
 async def patch_provider_enabled(
     provider_id: uuid.UUID,
     payload: NotificationProviderEnabledPatch,
@@ -171,12 +165,8 @@ async def get_deliveries(
     )
 
 
-@router.get(
-    "/deliveries/{delivery_id}", response_model=NotificationDeliveryDetail
-)
-async def get_delivery(
-    delivery_id: uuid.UUID, session: SessionDep
-) -> NotificationDeliveryDetail:
+@router.get("/deliveries/{delivery_id}", response_model=NotificationDeliveryDetail)
+async def get_delivery(delivery_id: uuid.UUID, session: SessionDep) -> NotificationDeliveryDetail:
     from nbplatform.core.errors import NotFoundError
 
     row = await NotificationRepository(session).get_delivery(delivery_id)
@@ -185,9 +175,7 @@ async def get_delivery(
     return NotificationDeliveryDetail.model_validate(row)
 
 
-@router.post(
-    "/deliveries/{delivery_id}/retry", status_code=status.HTTP_202_ACCEPTED
-)
+@router.post("/deliveries/{delivery_id}/retry", status_code=status.HTTP_202_ACCEPTED)
 async def retry_delivery(
     delivery_id: uuid.UUID,
     redis: RedisDep,

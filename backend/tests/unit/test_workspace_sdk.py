@@ -22,10 +22,15 @@ def test_json_roundtrip(ws_root: Path) -> None:
     assert workspace_sdk.read_json("output/status.json") == {"ok": True, "n": 3}
 
 
-def test_csv_roundtrip_stdlib(ws_root: Path) -> None:
+def test_csv_roundtrip(ws_root: Path) -> None:
     rows = [{"a": "1", "b": "x"}, {"a": "2", "b": "y"}]
     workspace_sdk.write_csv(rows, "output/data.csv")
-    assert workspace_sdk.read_csv("output/data.csv") == rows
+    # pandas é dependência agora → read_csv devolve DataFrame
+    df = workspace_sdk.read_csv("output/data.csv")
+    assert list(df.columns) == ["a", "b"]
+    assert df.shape == (2, 2)
+    assert df["b"].tolist() == ["x", "y"]
+    assert df["a"].tolist() == [1, 2]
 
 
 def test_list_and_exists(ws_root: Path) -> None:

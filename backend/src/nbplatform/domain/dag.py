@@ -28,9 +28,7 @@ def validate_dag[N: Hashable](nodes: Iterable[N], edges: Iterable[tuple[N, N]]) 
         raise DomainValidationError("O workflow contém um ciclo de dependências.")
 
 
-def topological_order[N: Hashable](
-    nodes: Iterable[N], edges: Iterable[tuple[N, N]]
-) -> list[N]:
+def topological_order[N: Hashable](nodes: Iterable[N], edges: Iterable[tuple[N, N]]) -> list[N]:
     """Ordem de execução respeitando dependências. Levanta se houver ciclo."""
     node_set = set(nodes)
     edge_list = list(edges)
@@ -42,9 +40,7 @@ def topological_order[N: Hashable](
         adjacency[src].append(dst)
         indegree[dst] += 1
 
-    queue: deque[N] = deque(
-        sorted((n for n, deg in indegree.items() if deg == 0), key=str)
-    )
+    queue: deque[N] = deque(sorted((n for n, deg in indegree.items() if deg == 0), key=str))
     order: list[N] = []
     while queue:
         node = queue.popleft()

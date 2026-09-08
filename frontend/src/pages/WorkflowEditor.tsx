@@ -13,20 +13,24 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { SchedulePanel } from "@/components/workflow/SchedulePanel";
 import { TaskNode, type TaskNodeData } from "@/components/workflow/TaskNode";
+import { WorkspaceNotebookPicker } from "@/components/workflow/WorkspaceNotebookPicker";
 import { useTheme } from "@/components/ThemeProvider";
 import { useRunWorkflow } from "@/hooks/useJobs";
-import { useNotebooks } from "@/hooks/useNotebooks";
 import { useSaveGraph, useUpdateWorkflow, useWorkflow } from "@/hooks/useWorkflows";
 import { buildGraphPayload, type WorkflowDetail } from "@/lib/workflows";
 import { Button, IconButton, PageHeader, StatusChip, useToast } from "@/ui";
-import { AddIcon, BellIcon, DeleteIcon, RunIcon, SaveIcon } from "@/ui/icons";
+import { AddIcon, BellIcon, DeleteIcon, NotebookIcon, RunIcon, SaveIcon } from "@/ui/icons";
 
 const nodeTypes = { task: TaskNode };
 const newId = (): string =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `t-${Math.random().toString(36).slice(2)}`;
+
+const nbBasename = (p: string | null): string | null =>
+  p ? p.split("/").pop() ?? p : null;
 
 function toFlow(wf: WorkflowDetail): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = wf.tasks.map((t, i) => ({
@@ -36,7 +40,9 @@ function toFlow(wf: WorkflowDetail): { nodes: Node[]; edges: Edge[] } {
     data: {
       name: t.name,
       notebookId: t.notebook_id,
-      notebookName: null,
+      workspaceId: t.workspace_id,
+      notebookPath: t.notebook_path,
+      notebookName: nbBasename(t.notebook_path),
       timeoutS: t.timeout_s,
       maxRetries: t.max_retries,
     } satisfies TaskNodeData,
@@ -54,7 +60,6 @@ function EditorInner({ id }: { id: string }) {
   const toast = useToast();
   const { theme } = useTheme();
   const { data: wf, isLoading, isError } = useWorkflow(id);
-  const { data: notebooks } = useNotebooks();
   const saveGraph = useSaveGraph(id);
   const updateMeta = useUpdateWorkflow(id);
   const run = useRunWorkflow(id);
@@ -64,25 +69,16 @@ function EditorInner({ id }: { id: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [name, setName] = useState("");
-
-  const notebookName = useCallback(
-    (nid: string | null) => notebooks?.find((n) => n.id === nid)?.name ?? null,
-    [notebooks],
-  );
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!wf || wf.updated_at === loadedAt) return;
     const flow = toFlow(wf);
-    flow.nodes.forEach((n) => {
-      (n.data as TaskNodeData).notebookName = notebookName(
-        (n.data as TaskNodeData).notebookId,
-      );
-    });
     setNodes(flow.nodes);
     setEdges(flow.edges);
     setName(wf.name);
     setLoadedAt(wf.updated_at);
-  }, [wf, loadedAt, notebookName, setNodes, setEdges]);
+  }, [wf, loadedAt, setNodes, setEdges]);
 
   const onConnect = useCallback(
     (c: Connection) => setEdges((eds) => addEdge({ ...c, id: newId() }, eds)),
@@ -108,6 +104,8 @@ function EditorInner({ id }: { id: string }) {
         data: {
           name: "Nova tarefa",
           notebookId: null,
+          workspaceId: null,
+          notebookPath: null,
           notebookName: null,
           timeoutS: null,
           maxRetries: 0,
@@ -135,6 +133,8 @@ function EditorInner({ id }: { id: string }) {
         data: {
           name: (n.data as TaskNodeData).name,
           notebookId: (n.data as TaskNodeData).notebookId,
+          workspaceId: (n.data as TaskNodeData).workspaceId,
+          notebookPath: (n.data as TaskNodeData).notebookPath,
           timeoutS: (n.data as TaskNodeData).timeoutS,
           maxRetries: (n.data as TaskNodeData).maxRetries,
         },
@@ -236,7 +236,7 @@ function EditorInner({ id }: { id: string }) {
           </ReactFlow>
         </div>
 
-        <aside className="w-64 shrink-0 rounded border border-surface-border p-3 text-sm">
+        <aside className="w-64 shrink-0 space-y-4 overflow-auto rounded border border-surface-border p-3 text-sm">
           {!selected && (
             <p className="text-fg-muted">Selecione uma tarefa para editar.</p>
           )}
@@ -250,24 +250,21 @@ function EditorInner({ id }: { id: string }) {
                   className="mt-0.5 w-full rounded border border-surface-border px-2 py-1"
                 />
               </label>
-              <label className="block">
-                <span className="text-xs text-fg-muted">Notebook</span>
-                <select
-                  value={(selected.data as TaskNodeData).notebookId ?? ""}
-                  onChange={(e) => {
-                    const nid = e.target.value || null;
-                    patchSelected({ notebookId: nid, notebookName: notebookName(nid) });
-                  }}
-                  className="mt-0.5 w-full rounded border border-surface-border px-2 py-1"
+              <div className="block">
+                <span className="text-xs text-fg-muted">Notebook do Workspace</span>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="mt-0.5 flex w-full items-center gap-1.5 rounded border border-surface-border px-2 py-1 text-left hover:bg-surface-variant"
                 >
-                  <option value="">—</option>
-                  {notebooks?.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <NotebookIcon className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate">
+                    {(selected.data as TaskNodeData).notebookPath ??
+                      (selected.data as TaskNodeData).notebookName ??
+                      "Escolher…"}
+                  </span>
+                </button>
+              </div>
               <label className="block">
                 <span className="text-xs text-fg-muted">Timeout (s)</span>
                 <input
@@ -297,9 +294,25 @@ function EditorInner({ id }: { id: string }) {
               </label>
             </div>
           )}
+
+          <div className="border-t border-surface-border pt-3">
+            <SchedulePanel workflowId={id} />
+          </div>
         </aside>
       </div>
 
+      <WorkspaceNotebookPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={({ workspaceId, notebookPath, label }) =>
+          patchSelected({
+            workspaceId,
+            notebookPath,
+            notebookName: label,
+            notebookId: null,
+          })
+        }
+      />
     </div>
   );
 }

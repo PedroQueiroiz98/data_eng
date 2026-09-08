@@ -25,9 +25,12 @@ async def run_sandboxed(
     timeout_s: float,
     on_line: LineHandler,
     cancel_event: asyncio.Event | None = None,
+    cwd: str | None = None,
 ) -> PapermillResult:
     mode = get_settings().execution_sandbox
     if mode == "docker":
+        # o sandbox docker monta apenas o workdir em /work; para source=WORKSPACE o
+        # volume não está montado no container aninhado (pendente).
         return await run_in_docker(
             workdir=workdir,
             input_path=input_path,
@@ -43,6 +46,7 @@ async def run_sandboxed(
         output_path=output_path,
         params_path=params_path,
         env=env,
+        cwd=cwd,
         timeout_s=timeout_s,
         on_line=on_line,
         cancel_event=cancel_event,

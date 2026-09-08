@@ -21,9 +21,7 @@ _EXECUTION_TRANSITIONS: dict[ExecutionStatus, frozenset[ExecutionStatus]] = {
     _S.CANCELLED: frozenset(),
 }
 
-TERMINAL_EXECUTION_STATES: frozenset[ExecutionStatus] = frozenset(
-    {_S.SUCCESS, _S.CANCELLED}
-)
+TERMINAL_EXECUTION_STATES: frozenset[ExecutionStatus] = frozenset({_S.SUCCESS, _S.CANCELLED})
 
 
 def can_transition(current: ExecutionStatus, target: ExecutionStatus) -> bool:
@@ -32,9 +30,7 @@ def can_transition(current: ExecutionStatus, target: ExecutionStatus) -> bool:
 
 def assert_transition(current: ExecutionStatus, target: ExecutionStatus) -> None:
     if not can_transition(current, target):
-        raise ConflictError(
-            f"Transição de execução inválida: {current} → {target}."
-        )
+        raise ConflictError(f"Transição de execução inválida: {current} → {target}.")
 
 
 def is_terminal(status: ExecutionStatus) -> bool:

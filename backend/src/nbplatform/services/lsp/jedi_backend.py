@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import os
 from dataclasses import dataclass, field
 
 import jedi
@@ -67,7 +68,25 @@ def _environment(env_path: str) -> jedi.api.environment.Environment | None:
         return None
 
 
-def _script(source: str, env_path: str) -> jedi.Script:
+@functools.lru_cache(maxsize=16)
+def _project(root: str) -> jedi.Project | None:
+    try:
+        return jedi.Project(
+            root,
+            added_sys_path=[root, os.path.join(root, "scripts")],
+        )
+    except Exception:  # noqa: BLE001 - root inválido → sem projeto
+        return None
+
+
+def _script(source: str, env_path: str, workspace_root: str | None = None) -> jedi.Script:
+    if workspace_root and os.path.isdir(workspace_root):
+        return jedi.Script(
+            code=source,
+            path=os.path.join(workspace_root, "__nbp_buffer__.py"),
+            environment=_environment(env_path),
+            project=_project(workspace_root),
+        )
     return jedi.Script(code=source, path=_VIRTUAL_PATH, environment=_environment(env_path))
 
 
@@ -92,10 +111,17 @@ def _doc(text: str | None) -> str:
     return text[:_MAX_DOC] + ("…" if len(text) > _MAX_DOC else "")
 
 
-def complete(source: str, line: int, column: int, env_path: str, limit: int) -> list[Completion]:
+def complete(
+    source: str,
+    line: int,
+    column: int,
+    env_path: str,
+    limit: int,
+    workspace_root: str | None = None,
+) -> list[Completion]:
     line, column = _clamp(source, line, column)
     out: list[Completion] = []
-    for c in _script(source, env_path).complete(line, column, fuzzy=False)[:limit]:
+    for c in _script(source, env_path, workspace_root).complete(line, column, fuzzy=False)[:limit]:
         try:
             insert = c.name_with_symbols if c.type == "param" else c.name
         except Exception:  # noqa: BLE001
@@ -112,9 +138,11 @@ def complete(source: str, line: int, column: int, env_path: str, limit: int) -> 
     return out
 
 
-def hover(source: str, line: int, column: int, env_path: str) -> HoverInfo | None:
+def hover(
+    source: str, line: int, column: int, env_path: str, workspace_root: str | None = None
+) -> HoverInfo | None:
     line, column = _clamp(source, line, column)
-    names = _script(source, env_path).help(line, column)
+    names = _script(source, env_path, workspace_root).help(line, column)
     if not names:
         return None
     n = names[0]
@@ -134,9 +162,11 @@ def hover(source: str, line: int, column: int, env_path: str) -> HoverInfo | Non
     )
 
 
-def signature(source: str, line: int, column: int, env_path: str) -> SignatureInfo | None:
+def signature(
+    source: str, line: int, column: int, env_path: str, workspace_root: str | None = None
+) -> SignatureInfo | None:
     line, column = _clamp(source, line, column)
-    sigs = _script(source, env_path).get_signatures(line, column)
+    sigs = _script(source, env_path, workspace_root).get_signatures(line, column)
     if not sigs:
         return None
     s = sigs[0]
@@ -150,10 +180,12 @@ def signature(source: str, line: int, column: int, env_path: str) -> SignatureIn
     )
 
 
-def goto(source: str, line: int, column: int, env_path: str) -> list[Location]:
+def goto(
+    source: str, line: int, column: int, env_path: str, workspace_root: str | None = None
+) -> list[Location]:
     line, column = _clamp(source, line, column)
     try:
-        names = _script(source, env_path).goto(
+        names = _script(source, env_path, workspace_root).goto(
             line, column, follow_imports=True, follow_builtin_imports=False
         )
     except Exception:  # noqa: BLE001
@@ -161,10 +193,14 @@ def goto(source: str, line: int, column: int, env_path: str) -> list[Location]:
     return [_to_location(n) for n in names]
 
 
-def references(source: str, line: int, column: int, env_path: str) -> list[Location]:
+def references(
+    source: str, line: int, column: int, env_path: str, workspace_root: str | None = None
+) -> list[Location]:
     line, column = _clamp(source, line, column)
     try:
-        names = _script(source, env_path).get_references(line, column, include_builtins=False)
+        names = _script(source, env_path, workspace_root).get_references(
+            line, column, include_builtins=False
+        )
     except Exception:  # noqa: BLE001
         return []
     return [_to_location(n) for n in names]

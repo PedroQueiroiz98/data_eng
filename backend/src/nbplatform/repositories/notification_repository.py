@@ -42,9 +42,7 @@ class NotificationRepository:
     async def get_provider(self, provider_id: uuid.UUID) -> NotificationProvider | None:
         return await self.session.get(NotificationProvider, provider_id)
 
-    async def name_exists(
-        self, name: str, *, exclude: uuid.UUID | None = None
-    ) -> bool:
+    async def name_exists(self, name: str, *, exclude: uuid.UUID | None = None) -> bool:
         stmt = select(NotificationProvider.id).where(NotificationProvider.name == name)
         if exclude is not None:
             stmt = stmt.where(NotificationProvider.id != exclude)
@@ -89,14 +87,10 @@ class NotificationRepository:
         )
         return await self.session.scalar(stmt)
 
-    async def get_delivery(
-        self, delivery_id: uuid.UUID
-    ) -> NotificationDelivery | None:
+    async def get_delivery(self, delivery_id: uuid.UUID) -> NotificationDelivery | None:
         return await self.session.get(NotificationDelivery, delivery_id)
 
-    async def deliveries_for_job(
-        self, job_id: uuid.UUID
-    ) -> list[NotificationDelivery]:
+    async def deliveries_for_job(self, job_id: uuid.UUID) -> list[NotificationDelivery]:
         return list(
             await self.session.scalars(
                 select(NotificationDelivery)
@@ -121,9 +115,7 @@ class NotificationRepository:
     ) -> tuple[list[NotificationDelivery], int]:
         def apply(stmt: Select[Any]) -> Select[Any]:
             if provider is not None:
-                stmt = stmt.where(
-                    NotificationDelivery.notification_provider_id == provider
-                )
+                stmt = stmt.where(NotificationDelivery.notification_provider_id == provider)
             if status is not None:
                 stmt = stmt.where(NotificationDelivery.status == status)
             if event is not None:
@@ -133,9 +125,7 @@ class NotificationRepository:
             if job is not None:
                 stmt = stmt.where(NotificationDelivery.job_id == job)
             if environment:
-                stmt = stmt.where(
-                    NotificationDelivery.payload["environment"].astext == environment
-                )
+                stmt = stmt.where(NotificationDelivery.payload["environment"].astext == environment)
             if date_from is not None:
                 stmt = stmt.where(NotificationDelivery.created_at >= date_from)
             if date_to is not None:
@@ -151,9 +141,7 @@ class NotificationRepository:
             )
         )
         total = int(
-            await self.session.scalar(
-                apply(select(func.count()).select_from(NotificationDelivery))
-            )
+            await self.session.scalar(apply(select(func.count()).select_from(NotificationDelivery)))
             or 0
         )
         return rows, total

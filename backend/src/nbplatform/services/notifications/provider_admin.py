@@ -107,9 +107,7 @@ def _validate(
     has_secret: bool,
 ) -> None:
     try:
-        registry.get(provider_type).validate_config(
-            configuration, has_secret=has_secret
-        )
+        registry.get(provider_type).validate_config(configuration, has_secret=has_secret)
     except UnknownProviderType as exc:
         raise DomainValidationError(f"Tipo de provider desconhecido: {exc}.") from exc
     except ConfigError as exc:
@@ -127,9 +125,7 @@ async def create_provider(
     if await repo.name_exists(payload.name):
         raise DomainValidationError(f"Já existe um provider chamado '{payload.name}'.")
     has_secret = not _keep_secret(payload.secret)
-    _validate(
-        registry, payload.provider_type, payload.configuration, has_secret=has_secret
-    )
+    _validate(registry, payload.provider_type, payload.configuration, has_secret=has_secret)
     row = NotificationProvider(
         name=payload.name.strip(),
         description=(payload.description or None),
@@ -160,9 +156,7 @@ async def update_provider(
 
     if payload.name is not None:
         if await repo.name_exists(payload.name, exclude=provider_id):
-            raise DomainValidationError(
-                f"Já existe um provider chamado '{payload.name}'."
-            )
+            raise DomainValidationError(f"Já existe um provider chamado '{payload.name}'.")
         row.name = payload.name.strip()
     if payload.description is not None:
         row.description = payload.description or None
@@ -269,9 +263,7 @@ async def test_provider(
         except ValueError:
             return NotificationTestResult(ok=False, error="secret corrompido")
 
-    target = ResolvedTarget(
-        provider_id=row.id, config=row.configuration_json or {}, secret=secret
-    )
+    target = ResolvedTarget(provider_id=row.id, config=row.configuration_json or {}, secret=secret)
     timeout_s = get_settings().notification_send_timeout_s
     try:
         result = await asyncio.wait_for(
@@ -282,6 +274,4 @@ async def test_provider(
         return NotificationTestResult(ok=False, error=f"timeout após {timeout_s:.0f}s")
     except Exception as exc:  # noqa: BLE001
         return NotificationTestResult(ok=False, error=f"{type(exc).__name__}: {exc}")
-    return NotificationTestResult(
-        ok=result.ok, detail=result.detail, error=result.error
-    )
+    return NotificationTestResult(ok=result.ok, detail=result.detail, error=result.error)

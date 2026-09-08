@@ -67,9 +67,7 @@ class GitService:
         self.root = root
         self.timeout = get_settings().git_op_timeout_s
 
-    async def _run(
-        self, *args: str, check: bool = True
-    ) -> subprocess.CompletedProcess[str]:
+    async def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         def _call() -> subprocess.CompletedProcess[str]:
             return subprocess.run(  # noqa: S603 - args controlados, sem shell
                 ["git", *args],
@@ -107,9 +105,7 @@ class GitService:
             await self._run("config", "user.name", author_name or "nbplatform")
             await self._run("config", "user.email", author_email or "nbplatform@local")
             await self._run("add", "-A")
-            await self._run(
-                "commit", "-m", "Commit inicial do Workspace", "--allow-empty"
-            )
+            await self._run("commit", "-m", "Commit inicial do Workspace", "--allow-empty")
 
     async def status(self) -> GitStatus:
         if not await self.is_initialized():
@@ -133,9 +129,7 @@ class GitService:
             elif line.startswith(("1 ", "2 ")):
                 fields = line.split(" ", 8)
                 xy = fields[1]
-                changes.append(
-                    GitChange(path=fields[-1], index=xy[0], worktree=xy[1])
-                )
+                changes.append(GitChange(path=fields[-1], index=xy[0], worktree=xy[1]))
             elif line.startswith("? "):
                 changes.append(GitChange(path=line[2:], index="?", worktree="?"))
         return GitStatus(
@@ -207,9 +201,7 @@ class GitService:
                 await self._run("add", "-A")
             proc = await self._run("commit", "-m", message, check=False)
             if proc.returncode != 0:
-                raise GitError(
-                    (proc.stderr or proc.stdout or "nada para commitar").strip()
-                )
+                raise GitError((proc.stderr or proc.stdout or "nada para commitar").strip())
             head = await self._run("rev-parse", "HEAD")
             return head.stdout.strip()
 

@@ -19,9 +19,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, session: SessionDep) -> TokenResponse:
-    user, token = await AuthService(session).login(
-        email=payload.email, password=payload.password
-    )
+    user, token = await AuthService(session).login(email=payload.email, password=payload.password)
     await AuditService(session).record(
         user_id=user.id, action="LOGIN", resource_type="user", resource_id=str(user.id)
     )
@@ -33,12 +31,8 @@ async def me(user: CurrentUser) -> UserRead:
     return UserRead.model_validate(user)
 
 
-@router.post(
-    "/register", response_model=UserRead, status_code=status.HTTP_201_CREATED
-)
-async def register(
-    payload: RegisterRequest, session: SessionDep, admin: AdminUser
-) -> UserRead:
+@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+async def register(payload: RegisterRequest, session: SessionDep, admin: AdminUser) -> UserRead:
     user = await AuthService(session).register(
         email=payload.email,
         name=payload.name,

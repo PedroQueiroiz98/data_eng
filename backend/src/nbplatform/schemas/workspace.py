@@ -88,6 +88,15 @@ class DataPreviewRead(BaseModel):
     offset: int = 0
 
 
+class FilePathsRead(BaseModel):
+    path: str  # relativo à raiz do Workspace
+    name: str
+    parent_path: str
+    workspace_path: str  # "/<nome do workspace>/<rel>"
+    repository_path: str  # rel ao repo git (== path por ora)
+    read_example: str | None = None  # snippet pandas/open conforme extensão
+
+
 class WriteFileRequest(BaseModel):
     # Exatamente um dos dois. `.ipynb` aceita `notebook` (dict) ou `text` (json).
     text: str | None = None

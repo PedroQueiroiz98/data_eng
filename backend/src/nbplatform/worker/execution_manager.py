@@ -50,11 +50,11 @@ class ExecutionManager:
         workdir.mkdir(parents=True, exist_ok=True)
 
         try:
-            content, timeout_s, workspace_root = await self._start(exec_uuid, attempt)
-        except ConflictError:
-            logger.info(
-                "execução não está QUEUED; ignorando", extra={"execution_id": execution_id}
+            content, timeout_s, workspace_root, exec_cwd = await self._start(
+                exec_uuid, attempt
             )
+        except ConflictError:
+            logger.info("execução não está QUEUED; ignorando", extra={"execution_id": execution_id})
             await self.queue.clear_cancel(execution_id)
             return ExecutionStatus.CANCELLED
 
@@ -64,9 +64,7 @@ class ExecutionManager:
         pydeps_dir = workdir / ".pydeps"
         pydeps_dir.mkdir(parents=True, exist_ok=True)
         input_path.write_text(json.dumps(_ensure_language(content)), encoding="utf-8")
-        params_path.write_text(
-            json.dumps(await self._parameters(exec_uuid)), encoding="utf-8"
-        )
+        params_path.write_text(json.dumps(await self._parameters(exec_uuid)), encoding="utf-8")
 
         env = await self._build_env(pydeps_dir, workspace_root=workspace_root)
 
@@ -92,6 +90,7 @@ class ExecutionManager:
                 timeout_s=float(timeout_s or self.settings.execution_timeout_s),
                 on_line=lambda line: self._emit_log(exec_uuid, attempt, line),
                 cancel_event=cancel_event,
+                cwd=exec_cwd,
             )
         finally:
             for task in (heartbeat_task, cancel_watch):
@@ -140,9 +139,7 @@ class ExecutionManager:
         await self._finish(
             exec_uuid, failed_status, error_code, error_message, output_nb, output_path_str
         )
-        return await self._handle_failure(
-            exec_uuid, failed_status, error_code, error_message
-        )
+        return await self._handle_failure(exec_uuid, failed_status, error_code, error_message)
 
     async def _handle_failure(
         self,
@@ -187,16 +184,14 @@ class ExecutionManager:
         )
         await self._publish(
             exec_uuid,
-            make_event(
-                "status_changed", status=failed_status, error_message=error_message
-            ),
+            make_event("status_changed", status=failed_status, error_message=error_message),
         )
         return failed_status
 
     # ── passos ───────────────────────────────────────────────────────────────
     async def _start(
         self, exec_uuid: uuid.UUID, attempt: int
-    ) -> tuple[dict[str, Any], int | None, str | None]:
+    ) -> tuple[dict[str, Any], int | None, str | None, str | None]:
         async with session_scope() as session:
             service = ExecutionService(session)
             execution = await service.mark_running(
@@ -207,6 +202,7 @@ class ExecutionManager:
             workspace_id = execution.workspace_id
             notebook_path = execution.notebook_path
             notebook_version_id = execution.notebook_version_id
+            exec_cwd: str | None = None
             if source == ExecutionSource.WORKSPACE:
                 assert workspace_id is not None and notebook_path is not None, (
                     "execução WORKSPACE sem workspace_id/notebook_path"
@@ -217,18 +213,18 @@ class ExecutionManager:
                 # workspace_sdk enxerga esta raiz. No sandbox docker o volume ainda
                 # não é montado no container aninhado (pendente Fase 12).
                 workspace_root: str | None = str(root)
+                # cwd = pasta do notebook (Jupyter/Databricks: `../data/x.csv`).
+                nb_dir = (root / notebook_path).parent
+                if nb_dir.is_dir():
+                    exec_cwd = str(nb_dir)
             else:
-                assert notebook_version_id is not None, (
-                    "execução DB sem notebook_version_id"
-                )
+                assert notebook_version_id is not None, "execução DB sem notebook_version_id"
                 version = await service.notebooks.get_version_by_id(notebook_version_id)
                 assert version is not None  # FK garante existência
                 content = version.content
                 workspace_root = None
-        await self._publish(
-            exec_uuid, make_event("status_changed", status=ExecutionStatus.RUNNING)
-        )
-        return content, timeout_s, workspace_root
+        await self._publish(exec_uuid, make_event("status_changed", status=ExecutionStatus.RUNNING))
+        return content, timeout_s, workspace_root, exec_cwd
 
     async def _parameters(self, exec_uuid: uuid.UUID) -> dict[str, Any]:
         async with session_scope() as session:
@@ -239,9 +235,7 @@ class ExecutionManager:
         """Mascara valores de secrets no output.ipynb (nunca gravar segredo em notebook)."""
         if nb is None or not self._secret_values:
             return nb
-        masked: dict[str, Any] = json.loads(
-            mask_secrets(json.dumps(nb), self._secret_values)
-        )
+        masked: dict[str, Any] = json.loads(mask_secrets(json.dumps(nb), self._secret_values))
         return masked
 
     async def _build_env(

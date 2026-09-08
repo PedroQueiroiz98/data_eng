@@ -5,7 +5,7 @@ import pytest
 
 from nbplatform.api.main import create_app
 from tests.conftest import requires_services
-from tests.integration.helpers import make_notebook, notebook_content
+from tests.integration.helpers import execute_ws_notebook, make_workspace_notebook
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
@@ -36,8 +36,8 @@ async def test_metrics_is_public_and_prometheus_formatted(client) -> None:
 async def test_execution_count_reflected_in_metrics(client) -> None:
     before = _value(await _metrics(client), "nbp_executions_total")
 
-    nb = await make_notebook(client, "m", notebook_content("print(1)"))
-    await client.post(f"/api/notebooks/{nb}/execute", json={})
+    ws_id, path = await make_workspace_notebook(client, source="print(1)")
+    await execute_ws_notebook(client, ws_id, path)
 
     after = _value(await _metrics(client), "nbp_executions_total")
     assert after == before + 1

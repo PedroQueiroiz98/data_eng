@@ -12,13 +12,14 @@ from nbplatform.queue.redis_client import get_redis
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.worker.recovery import recover_stale_executions
 from tests.conftest import requires_services
+from tests.integration.helpers import execute_ws_notebook, make_workspace_notebook
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
 
 async def _make_running(client, *, attempt: int) -> uuid.UUID:
-    nb = (await client.post("/api/notebooks", json={"name": "rec"})).json()
-    ex = await client.post(f"/api/notebooks/{nb['id']}/execute", json={})
+    ws_id, path = await make_workspace_notebook(client)
+    ex = await execute_ws_notebook(client, ws_id, path)
     exec_id = uuid.UUID(ex.json()["id"])
     stale_ts = datetime.now(UTC) - timedelta(hours=1)
     async with session_scope() as session:

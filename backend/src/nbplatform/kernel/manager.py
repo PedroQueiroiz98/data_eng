@@ -66,9 +66,7 @@ class KernelSessionManager:
             if sess is not None:
                 self.sessions.pop(session_id, None)
 
-            raw_meta = await self.redis.hgetall(
-                self.settings.kernel_sess_key(session_id)
-            )
+            raw_meta = await self.redis.hgetall(self.settings.kernel_sess_key(session_id))
             meta = {str(k): str(v) for k, v in raw_meta.items()}
             if "workspace_id" not in meta:
                 logger.warning("sessão de kernel sem metadados: %s", session_id)
@@ -77,11 +75,19 @@ class KernelSessionManager:
             if len(self.sessions) >= self.settings.kernel_max_sessions:
                 await self._evict_idle()
 
-            root = str(Path(self.settings.workspaces_dir) / meta["workspace_id"])
-            env, secret_values = await resolve_workspace_env(root)
+            ws_root = Path(self.settings.workspaces_dir) / meta["workspace_id"]
+            # cwd = pasta do notebook (convenção Jupyter/Databricks: `../data/x.csv`
+            # resolve a partir de onde o notebook está). WORKSPACE_ROOT continua a raiz.
+            nb_path = meta.get("notebook_path", "")
+            cwd = ws_root
+            if nb_path and "/" in nb_path:
+                cand = (ws_root / nb_path).parent
+                if cand.is_dir():
+                    cwd = cand
+            env, secret_values = await resolve_workspace_env(str(ws_root))
             sess = KernelSession(
                 session_id,
-                cwd=root,
+                cwd=str(cwd),
                 env=env,
                 secret_values=secret_values,
                 startup_timeout=self.settings.kernel_startup_timeout_s,
@@ -98,9 +104,7 @@ class KernelSessionManager:
             sess.task = asyncio.create_task(sess.worker(emit))
             return sess
 
-    async def execute(
-        self, session_id: str, cell_id: str, code: str, request_id: str
-    ) -> None:
+    async def execute(self, session_id: str, cell_id: str, code: str, request_id: str) -> None:
         sess = await self.ensure(session_id)
         if sess is None or sess.status == "dead":
             await self._emit(
@@ -166,9 +170,7 @@ class KernelSessionManager:
 
     async def _evict_idle(self) -> None:
         idle = sorted(
-            (s.last_activity, sid)
-            for sid, s in self.sessions.items()
-            if s.status != "busy"
+            (s.last_activity, sid) for sid, s in self.sessions.items() if s.status != "busy"
         )
         if idle:
             logger.info("limite de kernels atingido; despejando %s", idle[0][1])
@@ -230,9 +232,7 @@ class KernelSessionManager:
     async def _reaper_loop(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(
-                    stop.wait(), timeout=self.settings.kernel_reaper_interval_s
-                )
+                await asyncio.wait_for(stop.wait(), timeout=self.settings.kernel_reaper_interval_s)
             if stop.is_set():
                 break
             with contextlib.suppress(Exception):

@@ -60,13 +60,19 @@ class JobService:
             user = await self.session.get(User, job.created_by)
             detail.started_by = user.email if user else None
 
+        path_by_wtid = {t.id: t.notebook_path for t in wtasks}
+
         detail.tasks = []
         for jt in sorted(job.tasks, key=lambda t: name_by_wtid.get(t.workflow_task_id, "")):
             item = JobTaskRead.model_validate(jt)
             item.name = name_by_wtid.get(jt.workflow_task_id, "")
             nb_id = nb_by_wtid.get(jt.workflow_task_id)
             item.notebook_id = nb_id
-            item.notebook_name = nb_name.get(nb_id, "") if nb_id else ""
+            nb_path = path_by_wtid.get(jt.workflow_task_id)
+            if nb_path:
+                item.notebook_name = nb_path.rsplit("/", 1)[-1]
+            else:
+                item.notebook_name = nb_name.get(nb_id, "") if nb_id else ""
             detail.tasks.append(item)
 
         detail.dependencies = [
@@ -115,9 +121,7 @@ class JobService:
         if job is None:
             raise NotFoundError(f"Job {job_id} não encontrado.")
         if job.status not in JOB_TERMINAL:
-            raise ConflictError(
-                f"Só é possível refazer um Job terminal (atual: {job.status})."
-            )
+            raise ConflictError(f"Só é possível refazer um Job terminal (atual: {job.status}).")
         if job.status == JobStatus.SUCCESS:
             raise ConflictError("Job já concluiu com sucesso.")
 

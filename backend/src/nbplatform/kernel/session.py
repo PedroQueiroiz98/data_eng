@@ -102,13 +102,9 @@ class KernelSession:
                 await self._do_restart(emit)
                 continue
             try:
-                await self._run_one(
-                    item["cell_id"], item["code"], item["request_id"], emit
-                )
+                await self._run_one(item["cell_id"], item["code"], item["request_id"], emit)
             except Exception:  # noqa: BLE001
-                logger.exception(
-                    "erro executando célula", extra={"session_id": self.session_id}
-                )
+                logger.exception("erro executando célula", extra={"session_id": self.session_id})
                 self.status = "dead"
                 await emit({"type": "kernel.status", "status": "dead", "reason": "kernel error"})
                 return
@@ -142,9 +138,7 @@ class KernelSession:
         self.last_activity = time.time()
         await emit({"type": "kernel.status", "status": "idle", "restarted": True})
 
-    async def _run_one(
-        self, cell_id: str, code: str, request_id: str, emit: EmitFn
-    ) -> None:
+    async def _run_one(self, cell_id: str, code: str, request_id: str, emit: EmitFn) -> None:
         assert self.kc is not None
         self.status = "busy"
         self.last_activity = time.time()
@@ -158,9 +152,7 @@ class KernelSession:
         try:
             while True:
                 try:
-                    msg = await asyncio.wait_for(
-                        self.kc.get_iopub_msg(), timeout=self.exec_timeout
-                    )
+                    msg = await asyncio.wait_for(self.kc.get_iopub_msg(), timeout=self.exec_timeout)
                 except TimeoutError:
                     with contextlib.suppress(Exception):
                         await self.km.interrupt_kernel()  # type: ignore[union-attr]

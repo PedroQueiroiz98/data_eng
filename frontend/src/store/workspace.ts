@@ -58,7 +58,7 @@ interface WorkspaceState {
   view: () => WorkspaceView;
 
   openTab: (path: string, kind?: TabKind) => void;
-  closeTab: (path: string) => void;
+  closeTab: (path: string, opts?: { forget?: boolean }) => void;
   closeOthers: (path: string) => void;
   closeToRight: (path: string) => void;
   closeAll: () => void;
@@ -66,6 +66,10 @@ interface WorkspaceState {
   reorderTabs: (from: number, to: number) => void;
   setActiveTab: (path: string) => void;
   renameTabPath: (from: string, to: string) => void;
+  /** remapeia abas/estado sob um prefixo (rename de pasta ou arquivo). */
+  renamePrefix: (fromPrefix: string, toPrefix: string) => void;
+  /** limpa estado órfão sob um prefixo (delete). */
+  forgetUnder: (prefix: string) => void;
 
   toggleDir: (path: string) => void;
   setExpanded: (path: string, expanded: boolean) => void;
@@ -143,9 +147,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             return { ...v, tabs: [...v.tabs, tab], activeTab: path };
           }),
 
-        closeTab: (path) => {
+        closeTab: (path, opts) => {
           const closed = get().view().tabs.find((t) => t.path === path);
-          if (closed) {
+          if (closed && !opts?.forget) {
             set((s) => ({
               recentlyClosed: [
                 closed,
@@ -213,19 +217,62 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         setActiveTab: (path) => mutate((v) => ({ ...v, activeTab: path })),
 
-        renameTabPath: (from, to) =>
-          mutate((v) => {
-            const tabs = v.tabs.map((t) =>
-              t.path === from
-                ? { ...t, path: to, title: baseName(to), kind: kindFromPath(to) }
-                : t,
-            );
+        renameTabPath: (from, to) => get().renamePrefix(from, to),
+
+        renamePrefix: (fromPrefix, toPrefix) => {
+          const remap = (p: string): string | null => {
+            if (p === fromPrefix) return toPrefix;
+            if (p.startsWith(`${fromPrefix}/`)) {
+              return toPrefix + p.slice(fromPrefix.length);
+            }
+            return null;
+          };
+          set((s) => {
+            const next: Record<string, boolean> = {};
+            for (const [k, val] of Object.entries(s.dirtyByPath)) {
+              next[remap(k) ?? k] = val;
+            }
             return {
-              ...v,
-              tabs,
-              activeTab: v.activeTab === from ? to : v.activeTab,
+              dirtyByPath: next,
+              recentlyClosed: s.recentlyClosed.map((t) => {
+                const np = remap(t.path);
+                return np
+                  ? { path: np, title: baseName(np), kind: kindFromPath(np) }
+                  : t;
+              }),
             };
-          }),
+          });
+          mutate((v) => ({
+            ...v,
+            tabs: v.tabs.map((t) => {
+              const np = remap(t.path);
+              return np
+                ? { path: np, title: baseName(np), kind: kindFromPath(np) }
+                : t;
+            }),
+            activeTab: v.activeTab ? (remap(v.activeTab) ?? v.activeTab) : null,
+            expandedDirs: v.expandedDirs.map((d) => remap(d) ?? d),
+          }));
+        },
+
+        forgetUnder: (prefix) => {
+          const under = (p: string): boolean =>
+            p === prefix || p.startsWith(`${prefix}/`);
+          set((s) => {
+            const dirty: Record<string, boolean> = {};
+            for (const [k, val] of Object.entries(s.dirtyByPath)) {
+              if (!under(k)) dirty[k] = val;
+            }
+            return {
+              dirtyByPath: dirty,
+              recentlyClosed: s.recentlyClosed.filter((t) => !under(t.path)),
+            };
+          });
+          mutate((v) => ({
+            ...v,
+            expandedDirs: v.expandedDirs.filter((d) => !under(d)),
+          }));
+        },
 
         toggleDir: (path) =>
           mutate((v) => ({

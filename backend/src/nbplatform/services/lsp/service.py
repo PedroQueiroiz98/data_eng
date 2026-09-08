@@ -90,7 +90,12 @@ class LspService:
 
     # ── operações ──────────────────────────────────────────────────────────
     async def complete(
-        self, cells: list[str], cell_index: int, line: int, column: int
+        self,
+        cells: list[str],
+        cell_index: int,
+        line: int,
+        column: int,
+        workspace_root: str | None = None,
     ) -> LspResult:
         started = time.perf_counter()
         vm = self._prepare(cells)
@@ -107,6 +112,7 @@ class LspService:
             abs_col,
             self.env_path,
             self.settings.lsp_max_completions,
+            workspace_root,
         )
         if items is None:
             return LspResult(ok=False, took_ms=_ms(started))
@@ -115,7 +121,12 @@ class LspService:
         return LspResult(ok=True, completions=filtered, took_ms=_ms(started))
 
     async def hover(
-        self, cells: list[str], cell_index: int, line: int, column: int
+        self,
+        cells: list[str],
+        cell_index: int,
+        line: int,
+        column: int,
+        workspace_root: str | None = None,
     ) -> LspResult:
         started = time.perf_counter()
         vm = self._prepare(cells)
@@ -126,7 +137,7 @@ class LspService:
         except IndexError:
             return LspResult(ok=False)
         info: HoverInfo | None = await self._run(
-            jedi_backend.hover, vm.source, abs_line, abs_col, self.env_path
+            jedi_backend.hover, vm.source, abs_line, abs_col, self.env_path, workspace_root
         )
         if info is None:
             return LspResult(ok=False, took_ms=_ms(started))
@@ -136,7 +147,12 @@ class LspService:
         return LspResult(ok=True, hover=info, took_ms=_ms(started))
 
     async def signature(
-        self, cells: list[str], cell_index: int, line: int, column: int
+        self,
+        cells: list[str],
+        cell_index: int,
+        line: int,
+        column: int,
+        workspace_root: str | None = None,
     ) -> LspResult:
         started = time.perf_counter()
         vm = self._prepare(cells)
@@ -147,7 +163,12 @@ class LspService:
         except IndexError:
             return LspResult(ok=False)
         info: SignatureInfo | None = await self._run(
-            jedi_backend.signature, vm.source, abs_line, abs_col, self.env_path
+            jedi_backend.signature,
+            vm.source,
+            abs_line,
+            abs_col,
+            self.env_path,
+            workspace_root,
         )
         if info is None:
             return LspResult(ok=False, took_ms=_ms(started))
@@ -155,14 +176,28 @@ class LspService:
         return LspResult(ok=True, signature=info, took_ms=_ms(started))
 
     async def definition(
-        self, cells: list[str], cell_index: int, line: int, column: int
+        self,
+        cells: list[str],
+        cell_index: int,
+        line: int,
+        column: int,
+        workspace_root: str | None = None,
     ) -> LspResult:
-        return await self._locate(jedi_backend.goto, cells, cell_index, line, column)
+        return await self._locate(
+            jedi_backend.goto, cells, cell_index, line, column, workspace_root
+        )
 
     async def references(
-        self, cells: list[str], cell_index: int, line: int, column: int
+        self,
+        cells: list[str],
+        cell_index: int,
+        line: int,
+        column: int,
+        workspace_root: str | None = None,
     ) -> LspResult:
-        return await self._locate(jedi_backend.references, cells, cell_index, line, column)
+        return await self._locate(
+            jedi_backend.references, cells, cell_index, line, column, workspace_root
+        )
 
     async def _locate(
         self,
@@ -171,6 +206,7 @@ class LspService:
         cell_index: int,
         line: int,
         column: int,
+        workspace_root: str | None = None,
     ) -> LspResult:
         started = time.perf_counter()
         vm = self._prepare(cells)
@@ -181,7 +217,7 @@ class LspService:
         except IndexError:
             return LspResult(ok=False)
         raw: list[Location] | None = await self._run(
-            fn, vm.source, abs_line, abs_col, self.env_path
+            fn, vm.source, abs_line, abs_col, self.env_path, workspace_root
         )
         if raw is None:
             return LspResult(ok=False, took_ms=_ms(started))

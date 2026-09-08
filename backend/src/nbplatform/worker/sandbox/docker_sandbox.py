@@ -118,7 +118,9 @@ async def run_in_docker(
     async def _kill_container() -> None:
         with contextlib.suppress(Exception):
             killer = await asyncio.create_subprocess_exec(
-                "docker", "kill", container_name,
+                "docker",
+                "kill",
+                container_name,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )

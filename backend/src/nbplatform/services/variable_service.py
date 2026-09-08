@@ -27,9 +27,7 @@ class VariableService:
 
     async def list_all(self) -> list[Variable]:
         return list(
-            await self.session.scalars(
-                select(Variable).order_by(Variable.scope, Variable.key)
-            )
+            await self.session.scalars(select(Variable).order_by(Variable.scope, Variable.key))
         )
 
     async def delete(self, key: str, *, scope: str = "global") -> None:

@@ -72,6 +72,4 @@ class RetryCoordinator:
             if attempt > policy.max_retries
             else f"erro {error_class.value} não elegível a retry"
         )
-        return RetryDecision(
-            action="dead", error_class=error_class, attempt=attempt, reason=reason
-        )
+        return RetryDecision(action="dead", error_class=error_class, attempt=attempt, reason=reason)

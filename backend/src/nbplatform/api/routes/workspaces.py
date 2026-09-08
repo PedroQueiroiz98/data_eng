@@ -37,6 +37,7 @@ from nbplatform.schemas.workspace import (
     DataPreviewRead,
     FileContentRead,
     FileNode,
+    FilePathsRead,
     RenameRequest,
     WorkspaceCreate,
     WorkspaceDetail,
@@ -155,9 +156,7 @@ async def list_members(
     return [WorkspaceMemberRead.model_validate(m) for m in rows]
 
 
-@router.put(
-    "/{workspace_id}/members/{user_id}", response_model=WorkspaceMemberRead
-)
+@router.put("/{workspace_id}/members/{user_id}", response_model=WorkspaceMemberRead)
 async def put_member(
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -169,15 +168,17 @@ async def put_member(
         workspace_id, user_id, WorkspaceRole(payload.role)
     )
     await _audit(
-        session, access.user.id, "WORKSPACE_MEMBER_SET", workspace_id,
-        target=user_id, role=payload.role,
+        session,
+        access.user.id,
+        "WORKSPACE_MEMBER_SET",
+        workspace_id,
+        target=user_id,
+        role=payload.role,
     )
     return WorkspaceMemberRead.model_validate(member)
 
 
-@router.delete(
-    "/{workspace_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/{workspace_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_member(
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -185,9 +186,7 @@ async def delete_member(
     access: WorkspaceOwner,
 ) -> None:
     await WorkspaceService(session).remove_member(workspace_id, user_id)
-    await _audit(
-        session, access.user.id, "WORKSPACE_MEMBER_REMOVE", workspace_id, target=user_id
-    )
+    await _audit(session, access.user.id, "WORKSPACE_MEMBER_REMOVE", workspace_id, target=user_id)
 
 
 # ── File Explorer ──────────────────────────────────────────────────────────
@@ -236,6 +235,53 @@ async def write_file(
     return FileContentRead.model_validate(content, from_attributes=True)
 
 
+_READ_EXAMPLE = {
+    ".csv": 'pd.read_csv("{p}")',
+    ".tsv": 'pd.read_csv("{p}", sep="\\t")',
+    ".parquet": 'pd.read_parquet("{p}")',
+    ".json": 'pd.read_json("{p}")',
+    ".xlsx": 'pd.read_excel("{p}")',
+    ".txt": 'open("{p}").read()',
+}
+
+
+@router.get("/{workspace_id}/file/paths", response_model=FilePathsRead)
+async def file_paths(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _access: WorkspaceViewer,
+    path: str = Query(min_length=1),
+    from_path: str | None = Query(default=None),
+) -> FilePathsRead:
+    """Caminhos canônicos de um arquivo (para Copy Path / Copy Read Example).
+
+    `from_path` (opcional): caminho de um notebook aberto — usado para o
+    `read_example` com caminho relativo.
+    """
+    import contextlib
+    from posixpath import basename, dirname, relpath
+
+    svc = WorkspaceService(session)
+    workspace = await svc.get(workspace_id)
+    content = await _fs(svc, workspace_id).read_file(path)  # 404 se não existir
+    rel = content.path
+    ext = ("." + rel.rsplit(".", 1)[-1].lower()) if "." in rel else ""
+    example_target = rel
+    if from_path:
+        with contextlib.suppress(ValueError):
+            example_target = relpath(rel, dirname(from_path))
+    tmpl = _READ_EXAMPLE.get(ext)
+    read_example = tmpl.format(p=example_target) if tmpl else None
+    return FilePathsRead(
+        path=rel,
+        name=basename(rel),
+        parent_path=dirname(rel),
+        workspace_path=f"/{workspace.name}/{rel}",
+        repository_path=rel,
+        read_example=read_example,
+    )
+
+
 @router.get("/{workspace_id}/data", response_model=DataPreviewRead)
 async def read_data(
     workspace_id: uuid.UUID,
@@ -271,9 +317,7 @@ async def export_notebook(
     )
 
 
-@router.post(
-    "/{workspace_id}/dir", response_model=FileNode, status_code=status.HTTP_201_CREATED
-)
+@router.post("/{workspace_id}/dir", response_model=FileNode, status_code=status.HTTP_201_CREATED)
 async def make_dir(
     workspace_id: uuid.UUID,
     session: SessionDep,
@@ -312,8 +356,12 @@ async def rename_entry(
     await svc.get_active(workspace_id)
     node = await _fs(svc, workspace_id).rename(payload.src, payload.dst)
     await _audit(
-        session, access.user.id, "WORKSPACE_FS_RENAME", workspace_id,
-        src=payload.src, dst=payload.dst,
+        session,
+        access.user.id,
+        "WORKSPACE_FS_RENAME",
+        workspace_id,
+        src=payload.src,
+        dst=payload.dst,
     )
     return FileNode.model_validate(node, from_attributes=True)
 
@@ -329,15 +377,17 @@ async def copy_entry(
     await svc.get_active(workspace_id)
     node = await _fs(svc, workspace_id).copy(payload.src, payload.dst)
     await _audit(
-        session, access.user.id, "WORKSPACE_FS_COPY", workspace_id,
-        src=payload.src, dst=payload.dst,
+        session,
+        access.user.id,
+        "WORKSPACE_FS_COPY",
+        workspace_id,
+        src=payload.src,
+        dst=payload.dst,
     )
     return FileNode.model_validate(node, from_attributes=True)
 
 
-@router.post(
-    "/{workspace_id}/upload", response_model=FileNode, status_code=status.HTTP_201_CREATED
-)
+@router.post("/{workspace_id}/upload", response_model=FileNode, status_code=status.HTTP_201_CREATED)
 async def upload_file(
     workspace_id: uuid.UUID,
     session: SessionDep,
@@ -347,12 +397,8 @@ async def upload_file(
 ) -> FileNode:
     svc = WorkspaceService(session)
     await svc.get_active(workspace_id)
-    node = await _fs(svc, workspace_id).save_upload(
-        path, file.filename or "arquivo", file
-    )
-    await _audit(
-        session, access.user.id, "WORKSPACE_FS_UPLOAD", workspace_id, path=node.path
-    )
+    node = await _fs(svc, workspace_id).save_upload(path, file.filename or "arquivo", file)
+    await _audit(session, access.user.id, "WORKSPACE_FS_UPLOAD", workspace_id, path=node.path)
     return FileNode.model_validate(node, from_attributes=True)
 
 
@@ -389,7 +435,10 @@ async def execute_workspace_notebook(
     result = ExecutionRead.model_validate(execution)
     if created:
         await _audit(
-            session, access.user.id, "EXECUTE_WORKSPACE_NOTEBOOK", workspace_id,
+            session,
+            access.user.id,
+            "EXECUTE_WORKSPACE_NOTEBOOK",
+            workspace_id,
             path=payload.notebook_path,
         )
         await session.commit()

@@ -50,9 +50,7 @@ class _Collector:
         self.items: list[RawDiagnostic] = []
 
     def unexpectedError(self, _filename: str, msg: str) -> None:  # noqa: N802
-        self.items.append(
-            RawDiagnostic(1, 0, None, "warning", str(msg), "pyflakes", "unexpected")
-        )
+        self.items.append(RawDiagnostic(1, 0, None, "warning", str(msg), "pyflakes", "unexpected"))
 
     def syntaxError(  # noqa: N802
         self,
@@ -94,8 +92,9 @@ def analyze(source: str) -> list[RawDiagnostic]:
     try:
         compile(source, "notebook.py", "exec")
     except SyntaxError as exc:
-        collector.syntaxError("notebook.py", exc.msg or "syntax error", exc.lineno or 1,
-                              exc.offset, exc.text)
+        collector.syntaxError(
+            "notebook.py", exc.msg or "syntax error", exc.lineno or 1, exc.offset, exc.text
+        )
         return collector.items  # pyflakes não roda com sintaxe quebrada
     with contextlib.suppress(Exception):  # pyflakes nunca deve derrubar a rota
         pyflakes_api.check(source, "notebook.py", collector)

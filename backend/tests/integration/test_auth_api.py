@@ -50,7 +50,7 @@ async def test_login_wrong_password(anon_client) -> None:
 
 
 async def test_protected_route_requires_token(anon_client) -> None:
-    resp = await anon_client.get("/api/notebooks")
+    resp = await anon_client.get("/api/workflows")
     assert resp.status_code == 401
 
 
@@ -74,6 +74,6 @@ async def test_member_cannot_manage_secrets(anon_client, client) -> None:
 
     # mas pode ler notebooks
     ok = await anon_client.get(
-        "/api/notebooks", headers={"Authorization": f"Bearer {member_token}"}
+        "/api/workflows", headers={"Authorization": f"Bearer {member_token}"}
     )
     assert ok.status_code == 200

@@ -22,9 +22,7 @@ class UnknownProviderType(KeyError):
 
 class NotificationProviderRegistry:
     def __init__(self, senders: Iterable[NotificationSender]) -> None:
-        self._by_type: dict[str, NotificationSender] = {
-            s.provider_type: s for s in senders
-        }
+        self._by_type: dict[str, NotificationSender] = {s.provider_type: s for s in senders}
 
     def get(self, provider_type: str) -> NotificationSender:
         try:
@@ -39,9 +37,7 @@ class NotificationProviderRegistry:
         return list(self._by_type)
 
 
-def default_registry(
-    *, email_sender: EmailSender | None = None
-) -> NotificationProviderRegistry:
+def default_registry(*, email_sender: EmailSender | None = None) -> NotificationProviderRegistry:
     return NotificationProviderRegistry(
         [
             EmailNotificationProvider(email_sender),

@@ -2,8 +2,13 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 export interface TaskNodeData {
   name: string;
+  /** rótulo exibido (basename do notebook do Workspace, ou nome legado) */
   notebookName: string | null;
+  /** legado — notebook do módulo global */
   notebookId: string | null;
+  /** notebook = arquivo do Workspace */
+  workspaceId: string | null;
+  notebookPath: string | null;
   timeoutS: number | null;
   maxRetries: number;
   [key: string]: unknown;

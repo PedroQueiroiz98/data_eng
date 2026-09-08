@@ -9,7 +9,13 @@ import { getAuthToken } from "@/lib/api";
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const DEFAULT_TIMEOUT_MS = 4000;
 
-export interface Position {
+export interface WorkspaceLspContext {
+  /** dá ao Jedi ciência dos arquivos do Workspace (scripts/*.py) */
+  workspaceId?: string;
+  notebookPath?: string;
+}
+
+export interface Position extends WorkspaceLspContext {
   cells: string[];
   cellIndex: number;
   line: number; // 0-based
@@ -126,6 +132,8 @@ const posBody = (p: Position) => ({
   cell_index: p.cellIndex,
   line: p.line,
   column: p.column,
+  workspace_id: p.workspaceId,
+  notebook_path: p.notebookPath,
 });
 
 export const lspComplete = (p: Position): Promise<CompletionResult> =>
@@ -156,8 +164,16 @@ export const lspDefinition = (p: Position): Promise<LocationsResult> =>
 export const lspReferences = (p: Position): Promise<LocationsResult> =>
   post("/lsp/references", posBody(p), { ok: false, locations: [] });
 
-export const lspDiagnostics = (cells: string[]): Promise<DiagnosticsResult> =>
-  post("/lsp/diagnostics", { cells }, { ok: false, took_ms: 0, items: [] }, 6000);
+export const lspDiagnostics = (
+  cells: string[],
+  ctx?: WorkspaceLspContext,
+): Promise<DiagnosticsResult> =>
+  post(
+    "/lsp/diagnostics",
+    { cells, workspace_id: ctx?.workspaceId, notebook_path: ctx?.notebookPath },
+    { ok: false, took_ms: 0, items: [] },
+    6000,
+  );
 
 export const lspAutoImport = (name: string): Promise<AutoImportResult> =>
   post("/lsp/auto-import", { name }, { ok: false, suggestions: [] });

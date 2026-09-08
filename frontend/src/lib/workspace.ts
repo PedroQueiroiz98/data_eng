@@ -94,6 +94,25 @@ export const getTree = (id: string, path = "", depth?: number): Promise<FileNode
 export const readFile = (id: string, path: string): Promise<FileContent> =>
   apiGet(`/workspaces/${id}/file?path=${encodeURIComponent(path)}`);
 
+export interface FilePaths {
+  path: string;
+  name: string;
+  parent_path: string;
+  workspace_path: string;
+  repository_path: string;
+  read_example: string | null;
+}
+
+export const getFilePaths = (
+  id: string,
+  path: string,
+  fromPath?: string,
+): Promise<FilePaths> => {
+  const qs = new URLSearchParams({ path });
+  if (fromPath) qs.set("from_path", fromPath);
+  return apiGet(`/workspaces/${id}/file/paths?${qs.toString()}`);
+};
+
 export const writeFile = (
   id: string,
   path: string,

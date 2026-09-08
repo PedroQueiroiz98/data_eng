@@ -3,12 +3,13 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import requires_services
+from tests.integration.helpers import make_notebook, notebook_content
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
 
 async def _notebook(client, name: str = "wf-nb") -> str:
-    return (await client.post("/api/notebooks", json={"name": name})).json()["id"]
+    return await make_notebook(client, name, notebook_content("print('ok')"))
 
 
 async def _workflow(client, name: str = "ETL") -> str:

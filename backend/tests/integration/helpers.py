@@ -6,6 +6,8 @@ import uuid
 
 from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import JobStatus, JobTaskStatus
+from nbplatform.domain.notebook_format import validate_notebook
+from nbplatform.models.notebook import Notebook, NotebookVersion
 from nbplatform.queue.redis_client import get_redis
 from nbplatform.repositories.job_repository import JobRepository
 from nbplatform.services.job_orchestrator import JobOrchestrator
@@ -37,10 +39,59 @@ def notebook_content(source: str, *, params_source: str = "value = 0\n") -> dict
 
 
 async def make_notebook(client, name: str, content: dict) -> str:
-    nb = (await client.post("/api/notebooks", json={"name": name})).json()
-    resp = await client.post(f"/api/notebooks/{nb['id']}/versions", json={"content": content})
+    """Cria um Notebook DB (legado) direto no banco.
+
+    O módulo global `/api/notebooks` foi removido; Jobs/Workflows legados ainda
+    referenciam `workflow_tasks.notebook_id`, então os testes seguem criando as
+    linhas via ORM.
+    """
+    validated = validate_notebook(content)
+    nb_id = uuid.uuid4()
+    async with session_scope() as session:
+        session.add(Notebook(id=nb_id, name=name, current_version=1))
+        session.add(
+            NotebookVersion(
+                notebook_id=nb_id, version_number=1, content=validated
+            )
+        )
+    return str(nb_id)
+
+
+_UNIQ = 0
+
+
+async def make_workspace(client, name: str | None = None) -> str:
+    global _UNIQ
+    _UNIQ += 1
+    resp = await client.post(
+        "/api/workspaces", json={"name": name or f"ws-{_UNIQ}-{uuid.uuid4().hex[:6]}"}
+    )
     assert resp.status_code == 201, resp.text
-    return nb["id"]
+    return resp.json()["id"]
+
+
+async def make_workspace_notebook(
+    client,
+    *,
+    source: str = "value = 0\n",
+    params_source: str = "value = 0\n",
+    path: str = "notebooks/nb.ipynb",
+) -> tuple[str, str]:
+    """Cria um Workspace + escreve um `.ipynb` nele. Retorna (workspace_id, path)."""
+    ws_id = await make_workspace(client)
+    resp = await client.put(
+        f"/api/workspaces/{ws_id}/file",
+        params={"path": path},
+        json={"notebook": notebook_content(source, params_source=params_source)},
+    )
+    assert resp.status_code == 200, resp.text
+    return ws_id, path
+
+
+async def execute_ws_notebook(client, ws_id: str, path: str, **body):
+    """`POST /api/workspaces/{id}/execute` — substitui o antigo /api/notebooks/{id}/execute."""
+    payload = {"notebook_path": path, **body}
+    return await client.post(f"/api/workspaces/{ws_id}/execute", json=payload)
 
 
 async def make_workflow(client, name: str, tasks: list[dict], deps: list[dict]) -> str:

@@ -40,9 +40,7 @@ _SPECS: list[tuple[str, MetricType, str]] = [
 ]
 
 
-async def _count(
-    session: AsyncSession, model: type, *where: ColumnElement[bool]
-) -> int:
+async def _count(session: AsyncSession, model: type, *where: ColumnElement[bool]) -> int:
     stmt = select(func.count()).select_from(model)
     for clause in where:
         stmt = stmt.where(clause)
@@ -86,12 +84,8 @@ async def collect_snapshot(session: AsyncSession, redis: Redis) -> dict[str, flo
             E,
             E.status.in_([ExecutionStatus.FAILED, ExecutionStatus.TIMEOUT]),
         ),
-        "nbp_executions_running": await _count(
-            session, E, E.status == ExecutionStatus.RUNNING
-        ),
-        "nbp_executions_queued": await _count(
-            session, E, E.status == ExecutionStatus.QUEUED
-        ),
+        "nbp_executions_running": await _count(session, E, E.status == ExecutionStatus.RUNNING),
+        "nbp_executions_queued": await _count(session, E, E.status == ExecutionStatus.QUEUED),
         "nbp_execution_duration_seconds_sum": float(dur_sum_ms or 0) / 1000.0,
         "nbp_execution_duration_seconds_count": int(dur_count or 0),
         "nbp_jobs_total": await _count(session, J),

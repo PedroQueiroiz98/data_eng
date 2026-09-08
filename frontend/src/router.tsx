@@ -7,8 +7,6 @@ import { Executions } from "@/pages/Executions";
 import { JobDetail } from "@/pages/JobDetail";
 import { Jobs } from "@/pages/Jobs";
 import { Login } from "@/pages/Login";
-import { NotebookEditor } from "@/pages/NotebookEditor";
-import { Notebooks } from "@/pages/Notebooks";
 import { NotificationsPage } from "@/pages/NotificationsPage";
 import { Schedules } from "@/pages/Schedules";
 import { Workspace } from "@/pages/Workspace";
@@ -32,8 +30,6 @@ export const router = createBrowserRouter(
           children: [
             { index: true, element: <Navigate to="/dashboard" replace /> },
             { path: "dashboard", element: <Dashboard /> },
-            { path: "notebooks", element: <Notebooks /> },
-            { path: "notebooks/:id", element: <NotebookEditor /> },
             { path: "workspaces", element: <Workspaces /> },
             { path: "workflows", element: <Workflows /> },
             { path: "workflows/:id", element: <WorkflowEditor /> },

@@ -29,10 +29,7 @@ RECONCILE_INTERVAL_S = 15
 async def _load_specs() -> list[ScheduleSpec]:
     async with session_scope() as session:
         schedules = await ScheduleRepository(session).list_enabled()
-        return [
-            ScheduleSpec(id=str(s.id), cron=s.cron, timezone=s.timezone)
-            for s in schedules
-        ]
+        return [ScheduleSpec(id=str(s.id), cron=s.cron, timezone=s.timezone) for s in schedules]
 
 
 async def _reconcile_loop(adapter: APSchedulerAdapter, stop: asyncio.Event) -> None:

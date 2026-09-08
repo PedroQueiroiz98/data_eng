@@ -101,21 +101,13 @@ def require_workspace_role(
         if user.role == "admin":
             return WorkspaceAccess(user=user, role=WorkspaceRole.OWNER, is_admin=True)
         member = await WorkspaceRepository(session).get_member(workspace_id, user.id)
-        if member is None or (
-            WORKSPACE_ROLE_RANK[member.role] < WORKSPACE_ROLE_RANK[minimum]
-        ):
+        if member is None or (WORKSPACE_ROLE_RANK[member.role] < WORKSPACE_ROLE_RANK[minimum]):
             raise ForbiddenError("Sem permissão neste Workspace.")
         return WorkspaceAccess(user=user, role=member.role, is_admin=False)
 
     return _dep
 
 
-WorkspaceViewer = Annotated[
-    WorkspaceAccess, Depends(require_workspace_role(WorkspaceRole.VIEWER))
-]
-WorkspaceEditor = Annotated[
-    WorkspaceAccess, Depends(require_workspace_role(WorkspaceRole.EDITOR))
-]
-WorkspaceOwner = Annotated[
-    WorkspaceAccess, Depends(require_workspace_role(WorkspaceRole.OWNER))
-]
+WorkspaceViewer = Annotated[WorkspaceAccess, Depends(require_workspace_role(WorkspaceRole.VIEWER))]
+WorkspaceEditor = Annotated[WorkspaceAccess, Depends(require_workspace_role(WorkspaceRole.EDITOR))]
+WorkspaceOwner = Annotated[WorkspaceAccess, Depends(require_workspace_role(WorkspaceRole.OWNER))]

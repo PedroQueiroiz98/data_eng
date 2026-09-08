@@ -21,7 +21,6 @@ from nbplatform.api.routes import (
     kernels,
     lsp,
     metrics,
-    notebooks,
     notifications,
     schedules,
     secrets,
@@ -101,7 +100,6 @@ def create_app() -> FastAPI:
     # Protegidos por JWT
     protected = [Depends(get_current_user)]
     for module in (
-        notebooks,
         executions,
         workflows,
         jobs,

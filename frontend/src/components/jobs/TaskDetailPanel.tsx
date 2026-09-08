@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { fmtDuration, type JobTask } from "@/lib/jobs";
 import { Button, StatusChip } from "@/ui";
-import { DownloadIcon, NotebookIcon, RetryIcon, ViewIcon } from "@/ui/icons";
+import { DownloadIcon, RetryIcon, ViewIcon } from "@/ui/icons";
 
 interface Props {
   task: JobTask;
@@ -73,17 +73,7 @@ export function TaskDetailPanel({
         </Row>
         <Row label="Tentativa">{task.attempt || 1}</Row>
         <Row label="Notebook">
-          {task.notebook_id ? (
-            <Link
-              to={`/notebooks/${task.notebook_id}`}
-              className="inline-flex items-center gap-1 text-primary hover:underline"
-            >
-              <NotebookIcon className="h-3.5 w-3.5" />
-              {task.notebook_name || task.notebook_id.slice(0, 8)}
-            </Link>
-          ) : (
-            "—"
-          )}
+          {task.notebook_name || task.notebook_id?.slice(0, 8) || "—"}
         </Row>
         {task.execution_id && (
           <Row label="Execução">

@@ -8,13 +8,14 @@ from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import ExecutionStatus
 from nbplatform.services.execution_service import ExecutionService
 from tests.conftest import requires_services
+from tests.integration.helpers import execute_ws_notebook, make_workspace_notebook
 
 pytestmark = [pytest.mark.asyncio, requires_services]
 
 
 async def _queued_execution(client) -> str:
-    nb = (await client.post("/api/notebooks", json={"name": "cr"})).json()
-    ex = await client.post(f"/api/notebooks/{nb['id']}/execute", json={})
+    ws_id, path = await make_workspace_notebook(client)
+    ex = await execute_ws_notebook(client, ws_id, path)
     assert ex.status_code == 202
     return ex.json()["id"]
 

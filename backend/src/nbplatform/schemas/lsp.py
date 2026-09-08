@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import uuid
+
 from pydantic import BaseModel, Field
 
 MAX_CELLS = 500
 MAX_CELL_CHARS = 100_000
 
 
-class _PositionRequest(BaseModel):
+class _WorkspaceCtx(BaseModel):
+    # Opcionais: dão ao Jedi ciência dos arquivos do Workspace (scripts/*.py).
+    workspace_id: uuid.UUID | None = None
+    notebook_path: str | None = Field(default=None, max_length=1024)
+
+
+class _PositionRequest(_WorkspaceCtx):
     cells: list[str] = Field(min_length=1, max_length=MAX_CELLS)
     cell_index: int = Field(ge=0)
     line: int = Field(ge=0)
@@ -35,7 +43,7 @@ class ReferencesRequest(_PositionRequest):
     pass
 
 
-class DiagnosticsRequest(BaseModel):
+class DiagnosticsRequest(_WorkspaceCtx):
     cells: list[str] = Field(min_length=1, max_length=MAX_CELLS)
 
 

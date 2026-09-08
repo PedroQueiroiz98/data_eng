@@ -9,6 +9,19 @@ import * as monaco from "monaco-editor";
 import { getEditorConfig } from "@/lib/editorConfig";
 import { lspAutoImport, lspComplete, lspDefinition, lspHover, lspSignature } from "@/lib/lsp";
 
+// ── Completion de caminhos de arquivo do Workspace dentro de strings ──────────
+interface WorkspaceFsCtx {
+  /** todos os caminhos relativos ao notebook aberto (ex.: "../data/x.csv") */
+  listRelPaths: () => string[];
+}
+let wsFsCtx: WorkspaceFsCtx | null = null;
+export function setWorkspaceFsContext(ctx: WorkspaceFsCtx | null): void {
+  wsFsCtx = ctx;
+}
+
+const READ_CALL_RE =
+  /(?:read_csv|read_parquet|read_json|read_excel|read_table|open|Path)\s*\(\s*(['"])([^'"]*)$/;
+
 export interface LspDoc {
   /** URIs (model.uri.toString()) das células, na ordem do notebook. */
   cellUris: string[];
@@ -16,12 +29,20 @@ export interface LspDoc {
   getCells: () => string[];
   /** Navega o editor para (célula, linha 0-based, coluna 0-based). */
   navigate: (cellIndex: number, line: number, column: number) => void;
+  /** contexto do Workspace (Jedi enxerga scripts/*.py) */
+  workspaceId?: string;
+  notebookPath?: string;
 }
 
 let activeDoc: LspDoc | null = null;
 export function setLspDoc(doc: LspDoc | null): void {
   activeDoc = doc;
 }
+
+const wsCtx = () => ({
+  workspaceId: activeDoc?.workspaceId,
+  notebookPath: activeDoc?.notebookPath,
+});
 
 function cellIndexOf(model: monaco.editor.ITextModel): number {
   if (!activeDoc) return -1;
@@ -60,6 +81,7 @@ export function registerPythonIntelligence(): void {
         cellIndex: idx,
         line: position.lineNumber - 1,
         column: position.column - 1,
+        ...wsCtx(),
       });
       if (token.isCancellationRequested || !res.ok) return { suggestions: [] };
 
@@ -94,6 +116,7 @@ export function registerPythonIntelligence(): void {
         cellIndex: idx,
         line: position.lineNumber - 1,
         column: position.column - 1,
+        ...wsCtx(),
       });
       if (token.isCancellationRequested || !res.ok || !res.name) return null;
       const header = res.signature
@@ -117,6 +140,7 @@ export function registerPythonIntelligence(): void {
         cellIndex: idx,
         line: position.lineNumber - 1,
         column: position.column - 1,
+        ...wsCtx(),
       });
       if (token.isCancellationRequested || !res.ok || !res.label) return null;
       return {
@@ -145,6 +169,7 @@ export function registerPythonIntelligence(): void {
         cellIndex: idx,
         line: position.lineNumber - 1,
         column: position.column - 1,
+        ...wsCtx(),
       });
       if (token.isCancellationRequested || !res.ok) return null;
       const out: monaco.languages.Location[] = [];
@@ -163,6 +188,49 @@ export function registerPythonIntelligence(): void {
         });
       }
       return out;
+    },
+  });
+
+  // Completion de caminhos do Workspace: `pd.read_csv("../data/<aqui>`
+  monaco.languages.registerCompletionItemProvider("python", {
+    triggerCharacters: ['"', "'", "/"],
+    provideCompletionItems(model, position) {
+      if (!wsFsCtx || !getEditorConfig().editor.autocomplete) {
+        return { suggestions: [] };
+      }
+      const line = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      });
+      const m = READ_CALL_RE.exec(line);
+      if (!m) return { suggestions: [] };
+      const typed = m[2] ?? "";
+      const slash = typed.lastIndexOf("/");
+      const wordStart = position.column - (typed.length - slash - 1);
+      const range: monaco.IRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: wordStart,
+        endColumn: position.column,
+      };
+      const seen = new Set<string>();
+      const suggestions: monaco.languages.CompletionItem[] = [];
+      for (const rel of wsFsCtx.listRelPaths()) {
+        if (typed && !rel.startsWith(typed)) continue;
+        const rest = rel.slice(slash + 1);
+        const label = rest.includes("/") ? `${rest.split("/")[0]}/` : rest;
+        if (seen.has(label)) continue;
+        seen.add(label);
+        suggestions.push({
+          label,
+          kind: monaco.languages.CompletionItemKind.File,
+          insertText: label,
+          range,
+        });
+      }
+      return { suggestions };
     },
   });
 

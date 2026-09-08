@@ -29,11 +29,7 @@ class PapermillResult:
 
     @property
     def is_notebook_error(self) -> bool:
-        return (
-            self.exit_code == EXIT_NOTEBOOK_ERROR
-            and not self.timed_out
-            and not self.cancelled
-        )
+        return self.exit_code == EXIT_NOTEBOOK_ERROR and not self.timed_out and not self.cancelled
 
 
 async def run_papermill(
@@ -45,6 +41,7 @@ async def run_papermill(
     on_line: LineHandler,
     cancel_event: asyncio.Event | None = None,
     env: dict[str, str] | None = None,
+    cwd: str | None = None,
 ) -> PapermillResult:
     child_env = {**os.environ, **(env or {})}
     proc = await asyncio.create_subprocess_exec(
@@ -57,6 +54,7 @@ async def run_papermill(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         env=child_env,
+        cwd=cwd,
     )
 
     error_summary: str | None = None

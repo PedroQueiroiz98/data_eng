@@ -10,9 +10,11 @@ import {
   useWriteFile,
 } from "@/hooks/useWorkspace";
 import { useResizable } from "@/hooks/useResizable";
+import { copyText } from "@/lib/clipboard";
 import {
   downloadUrl,
   executeWorkspaceNotebook,
+  getFilePaths,
   uploadFile,
   type FileNode,
 } from "@/lib/workspace";
@@ -22,7 +24,7 @@ import {
   duplicateName,
   joinPath,
   kindFromPath,
-  logicalAbsPath,
+  relativeFrom,
 } from "@/lib/workspaceFiles";
 import { selectView, useWorkspaceStore } from "@/store/workspace";
 import { useWorkspaceRuntime } from "@/store/workspaceRuntime";
@@ -122,7 +124,8 @@ export function Workspace() {
     reopenClosed,
     reorderTabs,
     setActiveTab,
-    renameTabPath,
+    renamePrefix,
+    forgetUnder,
     toggleDir,
     setExpanded,
     collapseAllDirs,
@@ -239,14 +242,18 @@ export function Workspace() {
       label: "Novo nome",
       initial: node.name,
       confirmLabel: "Renomear",
-      onSubmit: (name) =>
+      onSubmit: (name) => {
+        const clean = name.trim().replace(/\/+/g, "");
+        if (!clean || clean === node.name) return;
+        const to = joinPath(parent, clean);
         rename.mutate(
-          { from: node.path, to: joinPath(parent, name) },
+          { from: node.path, to },
           {
-            onSuccess: () => renameTabPath(node.path, joinPath(parent, name)),
+            onSuccess: () => renamePrefix(node.path, to),
             onError: (e) => toast.error((e as Error).message),
           },
-        ),
+        );
+      },
     });
   };
 
@@ -269,7 +276,7 @@ export function Workspace() {
       { from: src, to },
       {
         onSuccess: () => {
-          renameTabPath(src, to);
+          renamePrefix(src, to);
           if (destDir) setExpanded(destDir, true);
         },
         onError: (e) => toast.error((e as Error).message),
@@ -287,11 +294,12 @@ export function Workspace() {
 
   const onDelete = async (node: FileNode) => {
     const ok = await confirm({
-      title: `Excluir ${node.name}`,
+      title: `Excluir ${node.name}?`,
       message:
-        node.type === "dir"
-          ? `Excluir a pasta "${node.path}" e todo o seu conteúdo?`
-          : `Excluir o arquivo "${node.path}"?`,
+        (node.type === "dir"
+          ? `A pasta "${node.path}" e todo o seu conteúdo serão removidos. `
+          : `O arquivo "${node.path}" será removido. `) +
+        "Esta ação não pode ser desfeita.",
       confirmLabel: "Excluir",
       danger: true,
     });
@@ -301,8 +309,11 @@ export function Workspace() {
       {
         onSuccess: () => {
           for (const p of openPaths) {
-            if (p === node.path || p.startsWith(`${node.path}/`)) closeTab(p);
+            if (p === node.path || p.startsWith(`${node.path}/`)) {
+              closeTab(p, { forget: true });
+            }
           }
+          forgetUnder(node.path);
         },
         onError: (e) => toast.error((e as Error).message),
       },
@@ -332,14 +343,35 @@ export function Workspace() {
     window.open(downloadUrl(id, node.path), "_blank");
   };
 
-  const onCopyPath = async (node: FileNode, relative: boolean) => {
-    const value = relative ? node.path : logicalAbsPath(id, node.path);
+  const onCopyPath = async (
+    node: FileNode,
+    kind: "path" | "relative" | "repo" | "read-example",
+  ) => {
+    let value: string | null = null;
     try {
-      await navigator.clipboard.writeText(value);
-      toast.success("Caminho copiado");
-    } catch {
-      toast.error("Não foi possível copiar");
+      if (kind === "relative") {
+        value = view.activeTab
+          ? relativeFrom(view.activeTab, node.path)
+          : node.path;
+      } else {
+        const info = await getFilePaths(id, node.path, view.activeTab ?? undefined);
+        value =
+          kind === "repo"
+            ? info.repository_path
+            : kind === "read-example"
+              ? info.read_example
+              : info.workspace_path;
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+      return;
     }
+    if (!value) {
+      toast.error("Sem exemplo de leitura para este tipo de arquivo.");
+      return;
+    }
+    if (await copyText(value)) toast.success("Caminho copiado");
+    else toast.error("Não foi possível copiar");
   };
 
   const onRun = async (node: FileNode) => {
@@ -371,12 +403,17 @@ export function Workspace() {
   const commandItems: PaletteItem[] = useMemo(
     () => [
       { id: "cmd:new-notebook", label: "Criar notebook" },
+      { id: "cmd:new-python", label: "Criar arquivo Python" },
+      { id: "cmd:new-sql", label: "Criar arquivo SQL" },
+      { id: "cmd:new-markdown", label: "Criar Markdown" },
       { id: "cmd:new-folder", label: "Criar pasta" },
+      { id: "cmd:open-file", label: "Abrir arquivo…", sublabel: "Ctrl+P" },
       { id: "cmd:run-all", label: "Executar todas as células" },
       { id: "cmd:restart-kernel", label: "Reiniciar kernel" },
       { id: "cmd:interrupt-kernel", label: "Interromper kernel" },
       { id: "cmd:save", label: "Salvar notebook", sublabel: "Ctrl+S" },
       { id: "cmd:clear-outputs", label: "Limpar saídas" },
+      { id: "cmd:create-workflow", label: "Criar Workflow do notebook" },
       { id: "cmd:git", label: "Git: abrir painel de alterações" },
       { id: "cmd:toggle-panel", label: "Alternar painel inferior", sublabel: "Ctrl+J" },
       { id: "cmd:toggle-explorer", label: "Alternar explorer", sublabel: "Ctrl+B" },
@@ -394,11 +431,40 @@ export function Workspace() {
       case "cmd:new-folder":
         onNewFolder("");
         break;
+      case "cmd:new-python":
+      case "cmd:new-sql":
+      case "cmd:new-markdown": {
+        const ext = cmdId.endsWith("python")
+          ? ".py"
+          : cmdId.endsWith("sql")
+            ? ".sql"
+            : ".md";
+        const dir = view.activeTab ? dirName(view.activeTab) : "";
+        openPrompt({
+          title: `Novo arquivo ${ext}`,
+          label: "Nome do arquivo",
+          initial: `novo${ext}`,
+          confirmLabel: "Criar",
+          onSubmit: (n) => {
+            const nm = n.endsWith(ext) ? n : `${n}${ext}`;
+            const p = joinPath(dir, nm);
+            writeFile.mutate(
+              { path: p, text: "" },
+              { onSuccess: () => openTab(p), onError: (e) => toast.error((e as Error).message) },
+            );
+          },
+        });
+        break;
+      }
+      case "cmd:open-file":
+        setPalette("files");
+        break;
       case "cmd:run-all":
       case "cmd:restart-kernel":
       case "cmd:interrupt-kernel":
       case "cmd:save":
       case "cmd:clear-outputs":
+      case "cmd:create-workflow":
         emitCommand(cmdId.replace("cmd:", ""));
         break;
       case "cmd:git":

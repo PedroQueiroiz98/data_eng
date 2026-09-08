@@ -1,9 +1,16 @@
-import { useMemo, useState } from "react";
-import Editor from "@monaco-editor/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import * as monacoNS from "monaco-editor";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { CellOutputList } from "@/components/notebook/mime/CellOutput";
 import { getEditorConfig } from "@/lib/editorConfig";
+import {
+  lspDefinition,
+  lspReferences,
+  type LspDiagnostic,
+  type LspLocation,
+} from "@/lib/lsp";
 import type { RunStatus, WCell } from "@/store/workspaceNotebook";
 import {
   AddIcon,
@@ -20,6 +27,9 @@ interface Props {
   total: number;
   theme: "light" | "dark";
   modelPath: string;
+  diagnostics?: LspDiagnostic[];
+  getCells: () => string[];
+  lspCtx: () => { workspaceId: string; notebookPath: string };
   onSource: (id: string, src: string) => void;
   onType: (id: string, t: WCell["cell_type"]) => void;
   onRun: (id: string) => void;
@@ -29,6 +39,12 @@ interface Props {
   onRemove: (id: string) => void;
   onAddBelow: (id: string) => void;
   onFocusCell: (id: string) => void;
+  onRegisterEditor: (
+    index: number,
+    editor: monacoNS.editor.IStandaloneCodeEditor | null,
+  ) => void;
+  onNavigate: (cellIndex: number, line: number, column: number) => void;
+  onShowLocations: (title: string, locations: LspLocation[]) => void;
 }
 
 const STATUS_DOT: Record<RunStatus, string> = {
@@ -39,12 +55,22 @@ const STATUS_DOT: Record<RunStatus, string> = {
   cancelled: "text-warn",
 };
 
+const SEV: Record<string, monacoNS.MarkerSeverity> = {
+  error: monacoNS.MarkerSeverity.Error,
+  warning: monacoNS.MarkerSeverity.Warning,
+  information: monacoNS.MarkerSeverity.Info,
+  hint: monacoNS.MarkerSeverity.Hint,
+};
+
 export function WorkspaceCell({
   cell,
   index,
   total,
   theme,
   modelPath,
+  diagnostics,
+  getCells,
+  lspCtx,
   onSource,
   onType,
   onRun,
@@ -54,20 +80,96 @@ export function WorkspaceCell({
   onRemove,
   onAddBelow,
   onFocusCell,
+  onRegisterEditor,
+  onNavigate,
+  onShowLocations,
 }: Props) {
   const isCode = cell.cell_type === "code";
   const [mdEditing, setMdEditing] = useState(cell.source.trim() === "");
+  const editorRef = useRef<monacoNS.editor.IStandaloneCodeEditor | null>(null);
   const lines = cell.source.split("\n").length;
   const height = Math.min(460, Math.max(64, lines * 19 + 16));
 
   const mdHtml = useMemo(() => {
     if (cell.cell_type !== "markdown") return "";
-    return DOMPurify.sanitize(marked.parse(cell.source || "*vazio*", { async: false }) as string);
+    return DOMPurify.sanitize(
+      marked.parse(cell.source || "*vazio*", { async: false }) as string,
+    );
   }, [cell.cell_type, cell.source]);
 
   const running = cell.runStatus === "running";
   const count =
     cell.execution_count != null ? `[${cell.execution_count}]` : running ? "[*]" : "[ ]";
+
+  const handleMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+    onRegisterEditor(index, editor);
+    const ctx = () => lspCtx();
+    editor.addAction({
+      id: "nbp.ws.goToDefinition",
+      label: "Ir para definição (notebook)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.F12, monaco.KeyCode.F12],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 1.1,
+      async run(ed) {
+        const pos = ed.getPosition();
+        if (!pos) return;
+        const res = await lspDefinition({
+          cells: getCells(),
+          cellIndex: index,
+          line: pos.lineNumber - 1,
+          column: pos.column - 1,
+          ...ctx(),
+        });
+        if (!res.ok || res.locations.length === 0) return;
+        const local = res.locations.find((l) => !l.external && l.cell_index >= 0);
+        if (local) onNavigate(local.cell_index, local.line, local.column);
+        else onShowLocations("Definição (biblioteca externa)", res.locations);
+      },
+    });
+    editor.addAction({
+      id: "nbp.ws.findReferences",
+      label: "Localizar referências (notebook)",
+      keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 1.2,
+      async run(ed) {
+        const pos = ed.getPosition();
+        if (!pos) return;
+        const res = await lspReferences({
+          cells: getCells(),
+          cellIndex: index,
+          line: pos.lineNumber - 1,
+          column: pos.column - 1,
+          ...ctx(),
+        });
+        if (res.ok) onShowLocations(`Referências (${res.locations.length})`, res.locations);
+      },
+    });
+  };
+
+  useEffect(() => {
+    const model = editorRef.current?.getModel();
+    if (!model) return;
+    monacoNS.editor.setModelMarkers(
+      model,
+      "nbp-lsp",
+      (diagnostics ?? []).map((d) => ({
+        severity: SEV[d.severity] ?? monacoNS.MarkerSeverity.Info,
+        message: `${d.message}${d.code ? ` (${d.code})` : ""}`,
+        source: d.source,
+        startLineNumber: d.line + 1,
+        startColumn: d.column + 1,
+        endLineNumber: d.line + 1,
+        endColumn: (d.end_column ?? d.column + 1) + 1,
+      })),
+    );
+  }, [diagnostics]);
+
+  useEffect(
+    () => () => onRegisterEditor(index, null),
+    [index, onRegisterEditor],
+  );
 
   return (
     <div
@@ -147,6 +249,7 @@ export function WorkspaceCell({
           language={isCode ? "python" : cell.cell_type === "markdown" ? "markdown" : "plaintext"}
           value={cell.source}
           onChange={(v) => onSource(cell.id, v ?? "")}
+          onMount={handleMount}
           options={{
             minimap: { enabled: false },
             lineNumbers: isCode ? "on" : "off",
@@ -155,6 +258,9 @@ export function WorkspaceCell({
             automaticLayout: true,
             padding: { top: 8, bottom: 8 },
             quickSuggestions: getEditorConfig().editor.autocomplete,
+            suggestOnTriggerCharacters: getEditorConfig().editor.autocomplete,
+            parameterHints: { enabled: getEditorConfig().editor.signatureHelp },
+            hover: { enabled: getEditorConfig().editor.hover },
             wordWrap: isCode ? "off" : "on",
           }}
         />

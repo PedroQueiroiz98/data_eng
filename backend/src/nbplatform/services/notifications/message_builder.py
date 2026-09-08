@@ -16,16 +16,10 @@ from nbplatform.models.notebook import Notebook
 from nbplatform.models.workflow import Workflow, WorkflowTask
 
 
-async def build_workflow_message(
-    session: AsyncSession, job: Job
-) -> NotificationMessage:
+async def build_workflow_message(session: AsyncSession, job: Job) -> NotificationMessage:
     """Mensagem de nível run (WORKFLOW_FAILED): resumo do pipeline que falhou."""
-    tasks = list(
-        await session.scalars(select(JobTask).where(JobTask.job_id == job.id))
-    )
-    failed = next(
-        (t for t in tasks if t.status.value in ("FAILED", "CANCELLED")), None
-    )
+    tasks = list(await session.scalars(select(JobTask).where(JobTask.job_id == job.id)))
+    failed = next((t for t in tasks if t.status.value in ("FAILED", "CANCELLED")), None)
     return await _build(
         session, job, failed, NotificationEventType.WORKFLOW_FAILED, "🚨 Pipeline falhou"
     )
@@ -64,7 +58,10 @@ async def _build(
 
     job_name = wtask.name if wtask else pipeline_name
     notebook_name: str | None = None
-    if wtask and wtask.notebook_id:
+    nb_path = wtask.notebook_path if wtask else None
+    if nb_path:
+        notebook_name = nb_path.rsplit("/", 1)[-1]
+    elif wtask and wtask.notebook_id:
         nb = await session.get(Notebook, wtask.notebook_id)
         notebook_name = nb.name if nb else None
 
@@ -77,9 +74,7 @@ async def _build(
         error_message = failed.error_message
         error_type = _ename(failed.error_message)
 
-    execution_id = (
-        str(failed.execution_id) if failed and failed.execution_id else str(job.id)
-    )
+    execution_id = str(failed.execution_id) if failed and failed.execution_id else str(job.id)
     attempt = failed.attempt if failed and failed.attempt else 1
     duration_ms = job.duration_ms
     when = (job.finished_at or datetime.now(UTC)).isoformat()
