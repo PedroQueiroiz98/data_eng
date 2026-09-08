@@ -10,6 +10,7 @@ Autorização (além do JWT):
 from __future__ import annotations
 
 import io
+import logging
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -38,6 +39,7 @@ from nbplatform.schemas.workspace import (
     FileContentRead,
     FileNode,
     FilePathsRead,
+    GenerateFileRequest,
     RenameRequest,
     WorkspaceCreate,
     WorkspaceDetail,
@@ -54,6 +56,28 @@ from nbplatform.services.workspace_fs_service import WorkspaceFsService
 from nbplatform.services.workspace_service import WorkspaceService
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
+logger = logging.getLogger("nbplatform.workspace.fs")
+
+
+def _log_op(
+    operation: str,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    status_: str = "SUCCESS",
+    **paths: str | None,
+) -> None:
+    """Log estruturado de operação de arquivo do Workspace (ver report §51)."""
+    logger.info(
+        "workspace file operation",
+        extra={
+            "operation": operation,
+            "workspace_id": str(workspace_id),
+            "user_id": str(user_id),
+            "status": status_,
+            **{k: v for k, v in paths.items() if v is not None},
+        },
+    )
 
 
 def _fs(svc: WorkspaceService, workspace_id: uuid.UUID) -> WorkspaceFsService:
@@ -232,6 +256,7 @@ async def write_file(
         path, text=payload.text, notebook=payload.notebook, if_match=if_match
     )
     await _audit(session, access.user.id, "WORKSPACE_FS_WRITE", workspace_id, path=path)
+    _log_op("SAVE", workspace_id=workspace_id, user_id=access.user.id, path=path)
     return FileContentRead.model_validate(content, from_attributes=True)
 
 
@@ -272,12 +297,14 @@ async def file_paths(
             example_target = relpath(rel, dirname(from_path))
     tmpl = _READ_EXAMPLE.get(ext)
     read_example = tmpl.format(p=example_target) if tmpl else None
+    # `workspace.name` é texto livre — barras quebrariam o caminho lógico.
+    display_name = workspace.name.replace("/", "-").strip() or workspace.slug
     return FilePathsRead(
         path=rel,
         name=basename(rel),
         parent_path=dirname(rel),
-        workspace_path=f"/{workspace.name}/{rel}",
-        repository_path=rel,
+        workspace_path=f"/{display_name}/{rel}",
+        repository_path=rel,  # relativo ao repo git (== path enquanto não há remoto)
         read_example=read_example,
     )
 
@@ -328,6 +355,7 @@ async def make_dir(
     await svc.get_active(workspace_id)
     node = await _fs(svc, workspace_id).make_dir(path)
     await _audit(session, access.user.id, "WORKSPACE_FS_MKDIR", workspace_id, path=path)
+    _log_op("CREATE_FOLDER", workspace_id=workspace_id, user_id=access.user.id, path=path)
     return FileNode.model_validate(node, from_attributes=True)
 
 
@@ -343,6 +371,7 @@ async def delete_entry(
     await svc.get_active(workspace_id)
     await _fs(svc, workspace_id).delete(path, recursive=recursive)
     await _audit(session, access.user.id, "WORKSPACE_FS_DELETE", workspace_id, path=path)
+    _log_op("DELETE", workspace_id=workspace_id, user_id=access.user.id, path=path)
 
 
 @router.post("/{workspace_id}/rename", response_model=FileNode)
@@ -362,6 +391,13 @@ async def rename_entry(
         workspace_id,
         src=payload.src,
         dst=payload.dst,
+    )
+    _log_op(
+        "RENAME",
+        workspace_id=workspace_id,
+        user_id=access.user.id,
+        old_path=payload.src,
+        new_path=payload.dst,
     )
     return FileNode.model_validate(node, from_attributes=True)
 
@@ -384,6 +420,13 @@ async def copy_entry(
         src=payload.src,
         dst=payload.dst,
     )
+    _log_op(
+        "DUPLICATE",
+        workspace_id=workspace_id,
+        user_id=access.user.id,
+        src=payload.src,
+        dst=payload.dst,
+    )
     return FileNode.model_validate(node, from_attributes=True)
 
 
@@ -399,6 +442,46 @@ async def upload_file(
     await svc.get_active(workspace_id)
     node = await _fs(svc, workspace_id).save_upload(path, file.filename or "arquivo", file)
     await _audit(session, access.user.id, "WORKSPACE_FS_UPLOAD", workspace_id, path=node.path)
+    _log_op("UPLOAD", workspace_id=workspace_id, user_id=access.user.id, path=node.path)
+    return FileNode.model_validate(node, from_attributes=True)
+
+
+@router.post(
+    "/{workspace_id}/generate",
+    response_model=FileNode,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_file(
+    workspace_id: uuid.UUID,
+    payload: GenerateFileRequest,
+    session: SessionDep,
+    access: WorkspaceEditor,
+) -> FileNode:
+    """Gera um arquivo sintético grande (ex.: CSV de 1.000.000 de linhas).
+
+    A geração roda em thread, streaming direto para disco — não passa pelo
+    navegador nem carrega o arquivo em memória.
+    """
+    svc = WorkspaceService(session)
+    await svc.get_active(workspace_id)
+    node = await _fs(svc, workspace_id).generate_csv(
+        payload.path, rows=payload.rows, seed=payload.seed
+    )
+    await _audit(
+        session,
+        access.user.id,
+        "WORKSPACE_FS_GENERATE",
+        workspace_id,
+        path=payload.path,
+        rows=payload.rows,
+    )
+    _log_op(
+        "GENERATE",
+        workspace_id=workspace_id,
+        user_id=access.user.id,
+        path=payload.path,
+        rows=str(payload.rows),
+    )
     return FileNode.model_validate(node, from_attributes=True)
 
 

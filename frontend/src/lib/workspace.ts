@@ -141,6 +141,54 @@ export const copyEntry = (id: string, from: string, to: string): Promise<FileNod
 export const downloadUrl = (id: string, path: string): string =>
   `${API_BASE}/workspaces/${id}/download?path=${encodeURIComponent(path)}`;
 
+/**
+ * Download autenticado (Bearer) via fetch + blob. `window.open(downloadUrl)` não
+ * envia o header Authorization e retorna 401 no modo bearer-only.
+ */
+export async function downloadFile(id: string, path: string): Promise<void> {
+  const token = getAuthToken();
+  const res = await fetch(downloadUrl(id, path), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let msg = `download → ${res.status}`;
+    try {
+      msg = (JSON.parse(text) as { error?: { message?: string } })?.error?.message ?? msg;
+    } catch {
+      /* corpo não-JSON */
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const m = /filename="?([^"]+)"?/.exec(cd);
+  a.download = m?.[1] ?? path.split("/").pop() ?? "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export interface GenerateFileBody {
+  path: string;
+  rows: number;
+  seed?: number | null;
+  kind?: "csv";
+}
+
+/** Gera um arquivo sintético grande no backend (streaming em disco). */
+export const generateFile = (id: string, body: GenerateFileBody): Promise<FileNode> =>
+  apiPost(`/workspaces/${id}/generate`, {
+    path: body.path,
+    rows: body.rows,
+    seed: body.seed ?? null,
+    kind: body.kind ?? "csv",
+  });
+
 export interface WorkspaceExecution {
   id: string;
   status: string;

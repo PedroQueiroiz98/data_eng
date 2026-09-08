@@ -114,6 +114,15 @@ class CopyRequest(RenameRequest):
     pass
 
 
+class GenerateFileRequest(BaseModel):
+    """Geração de arquivo sintético grande no backend (streaming em disco)."""
+
+    path: str = Field(min_length=1, max_length=1024)
+    kind: Literal["csv"] = "csv"
+    rows: int = Field(ge=1, le=5_000_000)
+    seed: int | None = None
+
+
 # ── Execução de notebook do Workspace (Fase 2) ───────────────────────────────
 class WorkspaceExecuteRequest(BaseModel):
     notebook_path: str = Field(min_length=1, max_length=1024)

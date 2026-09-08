@@ -46,24 +46,6 @@ export function useContextMenu(): {
   );
   const close = useCallback(() => setState(null), []);
 
-  useEffect(() => {
-    if (!state) return;
-    const onDown = (e: Event) => {
-      if (e.type === "keydown" && (e as KeyboardEvent).key !== "Escape") return;
-      close();
-    };
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onDown, true);
-    window.addEventListener("resize", onDown);
-    window.addEventListener("scroll", onDown, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onDown, true);
-      window.removeEventListener("resize", onDown);
-      window.removeEventListener("scroll", onDown, true);
-    };
-  }, [state, close]);
-
   const menu = state ? (
     <ContextMenuView state={state} onClose={close} />
   ) : null;
@@ -89,6 +71,49 @@ function ContextMenuView({
     const y = Math.min(state.y, window.innerHeight - h - 8);
     setPos({ x: Math.max(8, x), y: Math.max(8, y) });
   }, [state.x, state.y]);
+
+  // Dismiss ao interagir FORA do menu. O listener é registrado em fase de
+  // captura no `window`, portanto precisa checar `ref.contains(target)` — sem
+  // isso, o `mousedown` sobre um item do menu fecha o menu ANTES do `click`
+  // disparar e a ação nunca roda. O attach é adiado um tick para que o mesmo
+  // gesto que abriu o menu (clique com o botão direito) não o feche de imediato.
+  useEffect(() => {
+    let armed = false;
+    const arm = window.setTimeout(() => {
+      armed = true;
+    }, 0);
+
+    const isInside = (target: EventTarget | null): boolean =>
+      target instanceof Node && !!ref.current?.contains(target);
+
+    const onPointer = (e: Event) => {
+      if (!armed) return;
+      if (isInside(e.target)) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const onViewportChange = (e: Event) => {
+      // scroll dentro do próprio menu não deve fechá-lo
+      if (e.type === "scroll" && isInside(e.target)) return;
+      onClose();
+    };
+
+    window.addEventListener("mousedown", onPointer, true);
+    window.addEventListener("touchstart", onPointer, true);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      window.clearTimeout(arm);
+      window.removeEventListener("mousedown", onPointer, true);
+      window.removeEventListener("touchstart", onPointer, true);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
+  }, [onClose]);
 
   return (
     <div

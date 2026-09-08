@@ -21,8 +21,14 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from nbplatform.core.errors import ConflictError, DomainValidationError, NotFoundError
+from nbplatform.core.errors import (
+    ConflictError,
+    DomainValidationError,
+    ForbiddenError,
+    NotFoundError,
+)
 from nbplatform.domain.notebook_format import validate_notebook
+from nbplatform.domain.synthetic_data import iter_bi_csv_lines
 from nbplatform.domain.workspace_paths import (
     INTERNAL_DIR,
     is_ipynb,
@@ -33,6 +39,20 @@ from nbplatform.domain.workspace_paths import (
 
 _TEXT_SNIFF_BYTES = 8192
 _MAX_TEXT_BYTES = 5_000_000
+_MAX_GENERATED_BYTES = 400 * 1024 * 1024
+
+# Diretórios de topo que a API de arquivos nunca pode criar/alterar/remover.
+_PROTECTED_TOP_DIRS = frozenset({INTERNAL_DIR, ".git"})
+
+
+def _reject_protected(rel: str) -> None:
+    """Barra escrita/rename/delete em `.workspace/` e `.git/` (metadados internos)."""
+    first = normalize_rel(rel).parts[0]
+    if first in _PROTECTED_TOP_DIRS:
+        raise ForbiddenError(
+            f"'{first}/' é reservado (metadados internos) e não pode ser "
+            "modificado pela API de arquivos."
+        )
 
 
 @dataclass(slots=True)
@@ -174,6 +194,7 @@ class WorkspaceFsService:
         notebook: dict[str, Any] | None,
         if_match: str | None = None,
     ) -> FileContent:
+        _reject_protected(rel_path)
         target = resolve_within(self.root, rel_path)
         if target.is_dir():
             raise ConflictError(f"{rel_path} é um diretório.")
@@ -206,6 +227,7 @@ class WorkspaceFsService:
         return await asyncio.to_thread(self._make_dir_sync, rel_path)
 
     def _make_dir_sync(self, rel_path: str) -> FileNode:
+        _reject_protected(rel_path)
         target = resolve_within(self.root, rel_path)
         if target.exists() and target.is_file():
             raise ConflictError(f"{rel_path} já existe como arquivo.")
@@ -217,6 +239,7 @@ class WorkspaceFsService:
 
     def _delete_sync(self, rel_path: str, recursive: bool) -> None:
         normalize_rel(rel_path)  # rejeita raiz / traversal
+        _reject_protected(rel_path)
         target = resolve_within(self.root, rel_path)
         if target == self.root.resolve():
             raise ConflictError("Não é possível excluir a raiz do Workspace.")
@@ -233,6 +256,8 @@ class WorkspaceFsService:
         return await asyncio.to_thread(self._rename_sync, src_rel, dst_rel)
 
     def _rename_sync(self, src_rel: str, dst_rel: str) -> FileNode:
+        _reject_protected(src_rel)
+        _reject_protected(dst_rel)
         src = resolve_within(self.root, src_rel)
         dst = resolve_within(self.root, dst_rel)
         if not src.exists():
@@ -247,6 +272,7 @@ class WorkspaceFsService:
         return await asyncio.to_thread(self._copy_sync, src_rel, dst_rel)
 
     def _copy_sync(self, src_rel: str, dst_rel: str) -> FileNode:
+        _reject_protected(dst_rel)
         src = resolve_within(self.root, src_rel)
         dst = resolve_within(self.root, dst_rel)
         if not src.exists():
@@ -260,6 +286,37 @@ class WorkspaceFsService:
             shutil.copy2(src, dst)
         return self._node_for(dst)
 
+    # ── geração de dados sintéticos ─────────────────────────────────────────
+    async def generate_csv(
+        self, rel_path: str, *, rows: int, seed: int | None = None
+    ) -> FileNode:
+        return await asyncio.to_thread(self._generate_csv_sync, rel_path, rows, seed)
+
+    def _generate_csv_sync(self, rel_path: str, rows: int, seed: int | None) -> FileNode:
+        _reject_protected(rel_path)
+        target = resolve_within(self.root, rel_path)
+        if target.exists():
+            raise ConflictError(f"Já existe: {rel_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".gen-")
+        total = 0
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8", newline="") as buf:
+                for line in iter_bi_csv_lines(rows, seed=seed):
+                    total += len(line)
+                    if total > _MAX_GENERATED_BYTES:
+                        raise ConflictError(
+                            f"Arquivo gerado excederia {_MAX_GENERATED_BYTES} bytes; "
+                            "reduza o número de linhas."
+                        )
+                    buf.write(line)
+            os.replace(tmp_name, target)
+        except BaseException:
+            _silent_unlink(tmp_name)
+            raise
+        return self._node_for(target)
+
     # ── upload / download ────────────────────────────────────────────────────
     async def save_upload(self, rel_dir: str, filename: str, source: Any) -> FileNode:
         """`source` é um objeto com `.read(size)` async (UploadFile do FastAPI)."""
@@ -267,6 +324,7 @@ class WorkspaceFsService:
         if not safe_name or safe_name in (".", ".."):
             raise DomainValidationError("Nome de arquivo inválido.")
         dst_rel = f"{rel_dir.rstrip('/')}/{safe_name}" if rel_dir else safe_name
+        _reject_protected(dst_rel)
         target = resolve_within(self.root, dst_rel)
         target.parent.mkdir(parents=True, exist_ok=True)
 

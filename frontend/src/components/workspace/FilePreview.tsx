@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { useTheme } from "@/components/ThemeProvider";
+import { useHotkeys } from "@/hooks/useHotkeys";
 import { useWorkspaceFile, useWriteFile } from "@/hooks/useWorkspace";
-import { downloadUrl } from "@/lib/workspace";
-import { Button } from "@/ui";
+import { downloadFile } from "@/lib/workspace";
+import { Button, useToast } from "@/ui";
 import { DownloadIcon, SaveIcon, SpinnerIcon } from "@/ui/icons";
 
 interface Props {
   workspaceId: string;
   path: string;
   onDirtyChange: (path: string, dirty: boolean) => void;
+  active?: boolean;
 }
 
 const LANG_BY_EXT: Record<string, string> = {
@@ -37,8 +39,9 @@ function langFor(path: string): string {
   return LANG_BY_EXT[ext] ?? "plaintext";
 }
 
-export function FilePreview({ workspaceId, path, onDirtyChange }: Props) {
+export function FilePreview({ workspaceId, path, onDirtyChange, active = true }: Props) {
   const { theme } = useTheme();
+  const toast = useToast();
   const { data, isLoading, isError, error } = useWorkspaceFile(workspaceId, path);
   const save = useWriteFile(workspaceId);
 
@@ -59,6 +62,31 @@ export function FilePreview({ workspaceId, path, onDirtyChange }: Props) {
   useEffect(() => {
     onDirtyChange(path, dirty);
   }, [dirty, path, onDirtyChange]);
+
+  const value = draft ?? original;
+  const isNotebook = data?.kind === "notebook";
+
+  const onSave = useCallback(async () => {
+    if (draft == null || draft === original) return;
+    try {
+      if (isNotebook) {
+        await save.mutateAsync({
+          path,
+          notebook: JSON.parse(draft) as Record<string, unknown>,
+        });
+      } else {
+        await save.mutateAsync({ path, text: draft });
+      }
+      setDraft(null);
+      onDirtyChange(path, false);
+      toast.success("Salvo");
+    } catch (e) {
+      toast.error(`Não foi possível salvar: ${(e as Error).message}`);
+    }
+  }, [draft, original, isNotebook, save, path, onDirtyChange, toast]);
+
+  // Ctrl/Cmd+S salva o arquivo de texto/código (só a aba ativa).
+  useHotkeys({ "mod+s": () => void onSave() }, active && data?.kind !== "binary");
 
   if (isLoading) {
     return (
@@ -82,32 +110,20 @@ export function FilePreview({ workspaceId, path, onDirtyChange }: Props) {
         <p className="text-sm text-fg-muted">
           Arquivo binário — não pode ser editado no navegador.
         </p>
-        <a href={downloadUrl(workspaceId, path)} target="_blank" rel="noreferrer">
-          <Button size="sm" icon={<DownloadIcon className="h-4 w-4" />}>
-            Baixar {path.split("/").pop()}
-          </Button>
-        </a>
+        <Button
+          size="sm"
+          icon={<DownloadIcon className="h-4 w-4" />}
+          onClick={() => {
+            void downloadFile(workspaceId, path).catch((e) =>
+              toast.error((e as Error).message),
+            );
+          }}
+        >
+          Baixar {path.split("/").pop()}
+        </Button>
       </div>
     );
   }
-
-  const value = draft ?? original;
-  const isNotebook = data.kind === "notebook";
-
-  const onSave = async () => {
-    if (!dirty) return;
-    try {
-      if (isNotebook) {
-        await save.mutateAsync({ path, notebook: JSON.parse(value) as Record<string, unknown> });
-      } else {
-        await save.mutateAsync({ path, text: value });
-      }
-      setDraft(null);
-      onDirtyChange(path, false);
-    } catch {
-      // erro fica visível no botão via save.isError; toast tratado pelo caller se quiser
-    }
-  };
 
   return (
     <div className="flex h-full flex-col">
@@ -120,11 +136,18 @@ export function FilePreview({ workspaceId, path, onDirtyChange }: Props) {
         )}
         {dirty && <span className="text-amber-600 dark:text-amber-400">• modificado</span>}
         <div className="ml-auto flex items-center gap-1">
-          <a href={downloadUrl(workspaceId, path)} target="_blank" rel="noreferrer">
-            <Button size="sm" variant="text" icon={<DownloadIcon className="h-4 w-4" />}>
-              Baixar
-            </Button>
-          </a>
+          <Button
+            size="sm"
+            variant="text"
+            icon={<DownloadIcon className="h-4 w-4" />}
+            onClick={() => {
+              void downloadFile(workspaceId, path).catch((e) =>
+                toast.error((e as Error).message),
+              );
+            }}
+          >
+            Baixar
+          </Button>
           <Button
             size="sm"
             icon={<SaveIcon className="h-4 w-4" />}
@@ -132,7 +155,7 @@ export function FilePreview({ workspaceId, path, onDirtyChange }: Props) {
             loading={save.isPending}
             onClick={() => void onSave()}
           >
-            Salvar
+            {save.isPending ? "Salvando…" : "Salvar"}
           </Button>
         </div>
       </div>

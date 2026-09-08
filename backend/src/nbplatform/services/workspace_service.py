@@ -24,6 +24,7 @@ from nbplatform.domain.workspace_layout import (
     slugify,
 )
 from nbplatform.models.execution import Execution
+from nbplatform.models.workflow import WorkflowTask
 from nbplatform.models.workspace import Workspace, WorkspaceMember
 from nbplatform.repositories.workspace_repository import WorkspaceRepository
 
@@ -185,6 +186,28 @@ class WorkspaceService:
             raise ConflictError(
                 "Workspace tem execuções em andamento; aguarde ou cancele antes de excluir."
             )
+
+        # `executions.workspace_id` e `workflow_tasks.workspace_id` são FKs
+        # `ON DELETE RESTRICT` (proveniência). Sem esta checagem o DELETE explode
+        # num IntegrityError 500 — devolvemos um 409 claro e orientamos o
+        # soft-delete (que apenas inativa o Workspace).
+        hist_exec = await self.session.scalar(
+            select(func.count())
+            .select_from(Execution)
+            .where(Execution.workspace_id == workspace_id)
+        )
+        hist_task = await self.session.scalar(
+            select(func.count())
+            .select_from(WorkflowTask)
+            .where(WorkflowTask.workspace_id == workspace_id)
+        )
+        if hist_exec or hist_task:
+            raise ConflictError(
+                "Workspace tem histórico de execuções/workflows e não pode ser "
+                "removido permanentemente (proveniência). Use a exclusão simples "
+                "(sem purge), que apenas o inativa."
+            )
+
         root = Path(workspace.root_path)
         await self.repo.delete(workspace)
         await asyncio.to_thread(_rmtree_silent, root)

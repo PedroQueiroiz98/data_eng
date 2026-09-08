@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   useCopyEntry,
   useDeleteEntry,
+  useGenerateFile,
   useMakeDir,
   useRenameEntry,
   useWorkspace,
@@ -12,16 +13,16 @@ import {
 import { useResizable } from "@/hooks/useResizable";
 import { copyText } from "@/lib/clipboard";
 import {
-  downloadUrl,
+  downloadFile,
   executeWorkspaceNotebook,
   getFilePaths,
   uploadFile,
   type FileNode,
 } from "@/lib/workspace";
+import { downloadExport } from "@/lib/workspaceData";
 import {
   baseName,
   dirName,
-  duplicateName,
   joinPath,
   kindFromPath,
   relativeFrom,
@@ -150,6 +151,7 @@ export function Workspace() {
   const rename = useRenameEntry(id);
   const copy = useCopyEntry(id);
   const del = useDeleteEntry(id);
+  const generate = useGenerateFile(id);
 
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptValue, setPromptValue] = useState("");
@@ -229,9 +231,51 @@ export function Workspace() {
       confirmLabel: "Criar",
       onSubmit: (name) =>
         makeDir.mutate(joinPath(dir, name), {
-          onSuccess: () => setExpanded(dir, true),
+          onSuccess: () => {
+            setExpanded(dir, true);
+            void tree.refetch();
+          },
           onError: (e) => toast.error((e as Error).message),
         }),
+    });
+
+  const onGenerateCsv = (dir: string) =>
+    openPrompt({
+      title: "Gerar CSV de teste",
+      label: "Nome do arquivo",
+      initial: "bi_data.csv",
+      confirmLabel: "Próximo",
+      hint: `Será criado em ${dir || "/"} com dados sintéticos gerados no backend.`,
+      onSubmit: (name) => {
+        const fileName = name.endsWith(".csv") ? name : `${name}.csv`;
+        openPrompt({
+          title: "Gerar CSV de teste",
+          label: "Número de linhas",
+          initial: "1000000",
+          confirmLabel: "Gerar",
+          hint: "Entre 1 e 5.000.000. A geração roda no servidor (streaming em disco).",
+          onSubmit: (rowsRaw) => {
+            const rows = Number.parseInt(rowsRaw.replace(/\D/g, ""), 10);
+            if (!Number.isFinite(rows) || rows < 1) {
+              toast.error("Número de linhas inválido.");
+              return;
+            }
+            const path = joinPath(dir, fileName);
+            toast.show(`Gerando ${rows.toLocaleString("pt-BR")} linhas…`, "info");
+            generate.mutate(
+              { path, rows },
+              {
+                onSuccess: () => {
+                  setExpanded(dir, true);
+                  void tree.refetch();
+                  toast.success(`CSV gerado: ${fileName}`);
+                },
+                onError: (e) => toast.error((e as Error).message),
+              },
+            );
+          },
+        });
+      },
     });
 
   // ── ações de nó ────────────────────────────────────────────────────────────
@@ -284,12 +328,33 @@ export function Workspace() {
     );
   };
 
-  const onDuplicate = (node: FileNode) => {
-    const to = joinPath(dirName(node.path), duplicateName(node.name));
-    copy.mutate(
-      { from: node.path, to },
-      { onError: (e) => toast.error((e as Error).message) },
-    );
+  const onDuplicate = async (node: FileNode) => {
+    const parent = dirName(node.path);
+    const dot = node.name.lastIndexOf(".");
+    const stem = dot > 0 ? node.name.slice(0, dot) : node.name;
+    const suffix = dot > 0 ? node.name.slice(dot) : "";
+    // 1ª tentativa: "<nome> copy.<ext>"; em colisão: "<nome> copy 2.<ext>", …
+    for (let i = 1; i <= 50; i++) {
+      const candidate = `${stem} copy${i === 1 ? "" : ` ${i}`}${suffix}`;
+      const to = joinPath(parent, candidate);
+      try {
+        await copy.mutateAsync({ from: node.path, to });
+        setExpanded(parent, true);
+        void tree.refetch();
+        if (node.type === "file") openTab(to);
+        toast.success(`Duplicado: ${candidate}`);
+        return;
+      } catch (e) {
+        const err = e as { code?: string; status?: number; message?: string };
+        const isConflict = err.status === 409 || err.code === "CONFLICT";
+        if (!isConflict) {
+          toast.error(err.message ?? "Não foi possível duplicar.");
+          return;
+        }
+        // colisão → tenta o próximo sufixo
+      }
+    }
+    toast.error("Não foi possível encontrar um nome livre para a cópia.");
   };
 
   const onDelete = async (node: FileNode) => {
@@ -339,8 +404,12 @@ export function Workspace() {
     }
   };
 
-  const onDownload = (node: FileNode) => {
-    window.open(downloadUrl(id, node.path), "_blank");
+  const onDownload = async (node: FileNode) => {
+    try {
+      await downloadFile(id, node.path);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   const onCopyPath = async (
@@ -384,8 +453,13 @@ export function Workspace() {
     }
   };
 
-  const onExport = (node: FileNode) => {
-    window.open(downloadUrl(id, node.path), "_blank");
+  const onExport = async (node: FileNode) => {
+    try {
+      // Notebook → exporta como .py (nbconvert). Para .ipynb cru use "Baixar".
+      await downloadExport(id, node.path, "py");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   const fileItems: PaletteItem[] = useMemo(
@@ -628,6 +702,7 @@ export function Workspace() {
                     onNewFile={onNewFile}
                     onNewFolder={onNewFolder}
                     onUpload={onUpload}
+                    onGenerateCsv={onGenerateCsv}
                     onRename={onRename}
                     onMove={onMove}
                     onDuplicate={onDuplicate}

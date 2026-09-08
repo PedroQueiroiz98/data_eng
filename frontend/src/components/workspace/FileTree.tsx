@@ -26,6 +26,7 @@ export interface FileTreeCallbacks {
   onNewFile: (parentDir: string) => void;
   onNewFolder: (parentDir: string) => void;
   onUpload: (parentDir: string) => void;
+  onGenerateCsv: (parentDir: string) => void;
   onRename: (node: FileNode) => void;
   onMove: (node: FileNode) => void;
   onDuplicate: (node: FileNode) => void;
@@ -78,6 +79,7 @@ function entriesFor(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
       { label: "Novo arquivo", icon: i(FilePlusIcon), onClick: () => cb.onNewFile(node.path) },
       { label: "Nova pasta", icon: i(FolderPlusIcon), onClick: () => cb.onNewFolder(node.path) },
       { label: "Enviar arquivo", icon: i(UploadIcon), onClick: () => cb.onUpload(node.path) },
+      { label: "Gerar CSV de teste…", onClick: () => cb.onGenerateCsv(node.path) },
       "separator",
       ...copyEntries(node, cb),
       "separator",
@@ -100,6 +102,7 @@ function entriesFor(node: FileNode, cb: FileTreeCallbacks): ContextMenuEntry[] {
       ...copyEntries(node, cb),
       "separator",
       { label: "Renomear", icon: i(EditIcon), onClick: () => cb.onRename(node) },
+      { label: "Mover", onClick: () => cb.onMove(node) },
       { label: "Duplicar", icon: i(DuplicateIcon), onClick: () => cb.onDuplicate(node) },
       { label: "Excluir", icon: i(DeleteIcon), danger: true, onClick: () => cb.onDelete(node) },
     ];

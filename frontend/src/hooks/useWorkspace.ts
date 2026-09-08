@@ -4,6 +4,8 @@ import {
   createWorkspace,
   deleteEntry,
   deleteWorkspace,
+  generateFile,
+  type GenerateFileBody,
   getTree,
   getWorkspace,
   listWorkspaces,
@@ -138,5 +140,16 @@ export function useCopyEntry(id: string) {
   return useMutation({
     mutationFn: ({ from, to }: { from: string; to: string }) => copyEntry(id, from, to),
     onSuccess: () => invalidateTree(qc, id),
+  });
+}
+
+export function useGenerateFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: GenerateFileBody) => generateFile(id, body),
+    onSuccess: (_data, vars) => {
+      invalidateTree(qc, id);
+      void qc.invalidateQueries({ queryKey: keys.file(id, vars.path) });
+    },
   });
 }

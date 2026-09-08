@@ -108,6 +108,94 @@ async def test_soft_delete_hides_and_blocks_writes(client) -> None:
     assert blocked.status_code == 409
 
 
+async def test_generate_csv_endpoint(client) -> None:
+    ws = await _make_ws(client, "Gen")
+    wid = ws["id"]
+
+    r = await client.post(
+        f"/api/workspaces/{wid}/generate",
+        json={"path": "data/bi_data.csv", "rows": 25_000, "seed": 1},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["path"] == "data/bi_data.csv"
+    assert r.json()["size"] > 25_000
+
+    # preview limitado — nunca devolve as 25k linhas
+    prev = await client.get(
+        f"/api/workspaces/{wid}/data",
+        params={"path": "data/bi_data.csv", "limit": 100},
+    )
+    assert prev.status_code == 200
+    body = prev.json()
+    assert body["columns"] == [
+        "id", "customer_id", "product_id", "date",
+        "quantity", "price", "total", "region",
+    ]
+    assert len(body["rows"]) == 100
+
+    # não sobrescreve
+    again = await client.post(
+        f"/api/workspaces/{wid}/generate",
+        json={"path": "data/bi_data.csv", "rows": 10},
+    )
+    assert again.status_code == 409
+
+    # limite de linhas do schema
+    too_many = await client.post(
+        f"/api/workspaces/{wid}/generate",
+        json={"path": "data/huge.csv", "rows": 9_000_000},
+    )
+    assert too_many.status_code == 422
+
+
+async def test_purge_blocked_when_execution_history(client) -> None:
+    ws = await _make_ws(client, "Purge Hist")
+    wid = ws["id"]
+    nb = {
+        "nbformat": 4, "nbformat_minor": 5,
+        "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}},
+        "cells": [
+            {"cell_type": "code", "metadata": {"tags": ["parameters"]},
+             "source": "", "outputs": [], "execution_count": None},
+            {"cell_type": "code", "metadata": {}, "source": "x = 1\n",
+             "outputs": [], "execution_count": None},
+        ],
+    }
+    await client.put(
+        f"/api/workspaces/{wid}/file",
+        params={"path": "notebooks/n.ipynb"},
+        json={"notebook": nb},
+    )
+    ex = await client.post(
+        f"/api/workspaces/{wid}/execute",
+        json={"notebook_path": "notebooks/n.ipynb", "parameters": {}},
+    )
+    assert ex.status_code == 202, ex.text
+
+    # purge deve recusar com 409 (não 500) por causa da FK RESTRICT de executions
+    r = await client.delete(f"/api/workspaces/{wid}", params={"purge": "true"})
+    assert r.status_code == 409, r.text
+    assert r.json()["error"]["code"] == "conflict"
+
+    # soft-delete continua funcionando
+    assert (await client.delete(f"/api/workspaces/{wid}")).status_code == 204
+
+
+async def test_internal_dir_protected_via_api(client) -> None:
+    ws = await _make_ws(client, "Protected")
+    wid = ws["id"]
+    w = await client.put(
+        f"/api/workspaces/{wid}/file",
+        params={"path": ".workspace/workspace.json"},
+        json={"text": "{}"},
+    )
+    assert w.status_code == 403
+    d = await client.delete(
+        f"/api/workspaces/{wid}/file", params={"path": ".workspace"}
+    )
+    assert d.status_code == 403
+
+
 async def test_upload_and_download(client) -> None:
     ws = await _make_ws(client, "Upload")
     wid = ws["id"]

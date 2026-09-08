@@ -97,6 +97,39 @@ async def test_upload_size_cap(tmp_path: Path) -> None:
     assert not any(p.name.startswith(".upload-") for p in (svc.root / "input").iterdir())
 
 
+async def test_internal_dir_is_write_protected(tmp_path: Path) -> None:
+    svc = _svc(tmp_path / "ws")
+    with pytest.raises(ForbiddenError):
+        await svc.write_file(".workspace/workspace.json", text="{}", notebook=None)
+    with pytest.raises(ForbiddenError):
+        await svc.make_dir(".workspace/sub")
+    with pytest.raises(ForbiddenError):
+        await svc.delete(".workspace", recursive=True)
+    with pytest.raises(ForbiddenError):
+        await svc.rename("input", ".git/hooks")
+    await svc.write_file("input/a.txt", text="1", notebook=None)
+    with pytest.raises(ForbiddenError):
+        await svc.copy("input/a.txt", ".workspace/leak.txt")
+    # o diretório interno continua intacto
+    assert (svc.root / ".workspace").is_dir()
+
+
+async def test_generate_csv_streams_to_disk(tmp_path: Path) -> None:
+    svc = _svc(tmp_path / "ws")
+    node = await svc.generate_csv("data/bi.csv", rows=5000, seed=7)
+    assert node.type == "file" and node.path == "data/bi.csv"
+    raw = (svc.root / "data" / "bi.csv").read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    assert lines[0] == "id,customer_id,product_id,date,quantity,price,total,region"
+    assert len(lines) == 5001  # header + 5000
+    assert lines[1].startswith("1,")
+    assert lines[-1].startswith("5000,")
+    with pytest.raises(ConflictError):
+        await svc.generate_csv("data/bi.csv", rows=10, seed=7)  # já existe
+    with pytest.raises(ForbiddenError):
+        await svc.generate_csv(".workspace/x.csv", rows=10, seed=7)
+
+
 async def test_download_file_and_dir_zip(tmp_path: Path) -> None:
     svc = _svc(tmp_path / "ws")
     await svc.write_file("output/r.txt", text="result", notebook=None)
