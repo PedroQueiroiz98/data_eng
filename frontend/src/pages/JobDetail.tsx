@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LogTerminal } from "@/components/LogTerminal";
 import { JobSummary } from "@/components/jobs/JobSummary";
-import { NotificationsPanel } from "@/components/jobs/NotificationsPanel";
+import { NotificationDeliveryHistory } from "@/components/notifications/NotificationDeliveryHistory";
 import { PipelineGraph } from "@/components/jobs/PipelineGraph";
 import { RunHistory } from "@/components/jobs/RunHistory";
 import { TaskDetailPanel } from "@/components/jobs/TaskDetailPanel";
@@ -368,7 +368,7 @@ export function JobDetail() {
           )}
           {tab === "notifications" && (
             <Card>
-              <NotificationsPanel jobId={id} />
+              <NotificationDeliveryHistory jobFilter={id} compact />
             </Card>
           )}
           {tab === "history" && (

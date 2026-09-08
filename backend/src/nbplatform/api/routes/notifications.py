@@ -1,101 +1,204 @@
-"""Endpoints de notificação: config por pipeline, settings global, histórico, retry."""
+"""Endpoints da Central de Notificações: providers globais + histórico de envios."""
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 
 from nbplatform.api.deps import AdminUser, CurrentUserId, RedisDep, SessionDep
+from nbplatform.domain.notifications import (
+    NotificationEventType,
+    NotificationStatus,
+)
 from nbplatform.repositories.notification_repository import NotificationRepository
 from nbplatform.schemas.notification import (
-    NotificationConfigRead,
-    NotificationConfigUpdate,
-    NotificationRead,
-    NotificationSettingsRead,
-    NotificationSettingsUpdate,
+    NotificationDeliveryDetail,
+    NotificationDeliveryPage,
+    NotificationDeliveryRead,
+    NotificationProviderCreate,
+    NotificationProviderEnabledPatch,
+    NotificationProviderRead,
+    NotificationProviderUpdate,
+    NotificationTestResult,
 )
 from nbplatform.services.audit_service import AuditService
 from nbplatform.services.notifications import NotificationService
-from nbplatform.services.notifications.admin import (
-    get_config,
-    get_settings_read,
-    put_config,
-    put_settings,
+from nbplatform.services.notifications.provider_admin import (
+    create_provider,
+    delete_provider,
+    get_provider,
+    list_providers,
+    set_enabled,
+    test_provider,
+    update_provider,
 )
 
-router = APIRouter(tags=["notifications"])
+router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
-# ── config por Pipeline/Workflow ────────────────────────────────────────────
-@router.get(
-    "/api/workflows/{workflow_id}/notifications", response_model=NotificationConfigRead
-)
-async def read_workflow_notifications(
-    workflow_id: uuid.UUID, session: SessionDep
-) -> NotificationConfigRead:
-    return await get_config(session, workflow_id)
-
-
-@router.put(
-    "/api/workflows/{workflow_id}/notifications", response_model=NotificationConfigRead
-)
-async def update_workflow_notifications(
-    workflow_id: uuid.UUID,
-    payload: NotificationConfigUpdate,
-    session: SessionDep,
-    user_id: CurrentUserId,
-) -> NotificationConfigRead:
-    result = await put_config(session, workflow_id, payload)
-    await AuditService(session).record(
-        user_id=user_id,
-        action="UPDATE_NOTIFICATION_CONFIG",
-        resource_type="workflow",
-        resource_id=str(workflow_id),
-    )
-    return result
-
-
-# ── settings globais (admin) ────────────────────────────────────────────────
-@router.get("/api/notifications/settings", response_model=NotificationSettingsRead)
-async def read_notification_settings(
-    session: SessionDep, _admin: AdminUser
-) -> NotificationSettingsRead:
-    return await get_settings_read(session)
-
-
-@router.put("/api/notifications/settings", response_model=NotificationSettingsRead)
-async def update_notification_settings(
-    payload: NotificationSettingsUpdate, session: SessionDep, admin: AdminUser
-) -> NotificationSettingsRead:
-    result = await put_settings(session, payload)
-    await AuditService(session).record(
-        user_id=admin.id,
-        action="UPDATE_NOTIFICATION_SETTINGS",
-        resource_type="notification_settings",
-        resource_id="global",
-    )
-    return result
-
-
-# ── histórico + retry ──────────────────────────────────────────────────────
-@router.get("/api/jobs/{job_id}/notifications", response_model=list[NotificationRead])
-async def job_notifications(job_id: uuid.UUID, session: SessionDep) -> list[NotificationRead]:
-    rows = await NotificationRepository(session).for_job(job_id)
-    return [NotificationRead.model_validate(r) for r in rows]
+# ── providers ──────────────────────────────────────────────────────────────
+@router.get("/providers", response_model=list[NotificationProviderRead])
+async def get_providers(session: SessionDep) -> list[NotificationProviderRead]:
+    return await list_providers(session)
 
 
 @router.post(
-    "/api/notifications/{notification_id}/retry", status_code=status.HTTP_202_ACCEPTED
+    "/providers",
+    response_model=NotificationProviderRead,
+    status_code=status.HTTP_201_CREATED,
 )
-async def retry_notification(
-    notification_id: uuid.UUID, redis: RedisDep, user_id: CurrentUserId, session: SessionDep
+async def post_provider(
+    payload: NotificationProviderCreate, session: SessionDep, admin: AdminUser
+) -> NotificationProviderRead:
+    result = await create_provider(session, payload)
+    await AuditService(session).record(
+        user_id=admin.id,
+        action="CREATE_NOTIFICATION_PROVIDER",
+        resource_type="notification_provider",
+        resource_id=str(result.id),
+        metadata={"provider_type": result.provider_type},
+    )
+    return result
+
+
+@router.get("/providers/{provider_id}", response_model=NotificationProviderRead)
+async def get_one_provider(
+    provider_id: uuid.UUID, session: SessionDep
+) -> NotificationProviderRead:
+    return await get_provider(session, provider_id)
+
+
+@router.put("/providers/{provider_id}", response_model=NotificationProviderRead)
+async def put_provider(
+    provider_id: uuid.UUID,
+    payload: NotificationProviderUpdate,
+    session: SessionDep,
+    admin: AdminUser,
+) -> NotificationProviderRead:
+    result = await update_provider(session, provider_id, payload)
+    await AuditService(session).record(
+        user_id=admin.id,
+        action="UPDATE_NOTIFICATION_PROVIDER",
+        resource_type="notification_provider",
+        resource_id=str(provider_id),
+    )
+    return result
+
+
+@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def del_provider(
+    provider_id: uuid.UUID, session: SessionDep, admin: AdminUser
+) -> None:
+    await delete_provider(session, provider_id)
+    await AuditService(session).record(
+        user_id=admin.id,
+        action="DELETE_NOTIFICATION_PROVIDER",
+        resource_type="notification_provider",
+        resource_id=str(provider_id),
+    )
+
+
+@router.patch(
+    "/providers/{provider_id}/enabled", response_model=NotificationProviderRead
+)
+async def patch_provider_enabled(
+    provider_id: uuid.UUID,
+    payload: NotificationProviderEnabledPatch,
+    session: SessionDep,
+    admin: AdminUser,
+) -> NotificationProviderRead:
+    result = await set_enabled(session, provider_id, payload.enabled)
+    await AuditService(session).record(
+        user_id=admin.id,
+        action="TOGGLE_NOTIFICATION_PROVIDER",
+        resource_type="notification_provider",
+        resource_id=str(provider_id),
+        metadata={"enabled": payload.enabled},
+    )
+    return result
+
+
+@router.post("/providers/{provider_id}/test", response_model=NotificationTestResult)
+async def post_provider_test(
+    provider_id: uuid.UUID, session: SessionDep, redis: RedisDep, admin: AdminUser
+) -> NotificationTestResult:
+    result = await test_provider(session, redis, provider_id)
+    await AuditService(session).record(
+        user_id=admin.id,
+        action="TEST_NOTIFICATION_PROVIDER",
+        resource_type="notification_provider",
+        resource_id=str(provider_id),
+        metadata={"ok": result.ok},
+    )
+    return result
+
+
+# ── deliveries (histórico) ────────────────────────────────────────────────
+@router.get("/deliveries", response_model=NotificationDeliveryPage)
+async def get_deliveries(
+    session: SessionDep,
+    provider: Annotated[uuid.UUID | None, Query()] = None,
+    status_: Annotated[NotificationStatus | None, Query(alias="status")] = None,
+    event: Annotated[NotificationEventType | None, Query()] = None,
+    workflow: Annotated[uuid.UUID | None, Query()] = None,
+    job: Annotated[uuid.UUID | None, Query()] = None,
+    environment: Annotated[str | None, Query()] = None,
+    date_from: Annotated[datetime | None, Query()] = None,
+    date_to: Annotated[datetime | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> NotificationDeliveryPage:
+    rows, total = await NotificationRepository(session).list_deliveries(
+        provider=provider,
+        status=status_,
+        event=event,
+        workflow=workflow,
+        job=job,
+        environment=environment,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+    )
+    return NotificationDeliveryPage(
+        items=[NotificationDeliveryRead.model_validate(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/deliveries/{delivery_id}", response_model=NotificationDeliveryDetail
+)
+async def get_delivery(
+    delivery_id: uuid.UUID, session: SessionDep
+) -> NotificationDeliveryDetail:
+    from nbplatform.core.errors import NotFoundError
+
+    row = await NotificationRepository(session).get_delivery(delivery_id)
+    if row is None:
+        raise NotFoundError(f"Delivery {delivery_id} não encontrada.")
+    return NotificationDeliveryDetail.model_validate(row)
+
+
+@router.post(
+    "/deliveries/{delivery_id}/retry", status_code=status.HTTP_202_ACCEPTED
+)
+async def retry_delivery(
+    delivery_id: uuid.UUID,
+    redis: RedisDep,
+    user_id: CurrentUserId,
+    session: SessionDep,
 ) -> dict[str, str]:
-    await NotificationService(redis).retry(notification_id)
+    await NotificationService(redis).retry(delivery_id)
     await AuditService(session).record(
         user_id=user_id,
-        action="RETRY_NOTIFICATION",
-        resource_type="notification",
-        resource_id=str(notification_id),
+        action="RETRY_NOTIFICATION_DELIVERY",
+        resource_type="notification_delivery",
+        resource_id=str(delivery_id),
     )
     return {"status": "queued"}

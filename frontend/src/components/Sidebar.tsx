@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { NavLink } from "react-router-dom";
 import { Tooltip } from "@/ui/Tooltip";
 import {
+  BellIcon,
   CollapseIcon,
   DashboardIcon,
   ExpandIcon,
@@ -29,6 +30,7 @@ const ITEMS: Item[] = [
   { label: "Jobs", to: "/jobs", Icon: JobsIcon },
   { label: "Execuções", to: "/executions", Icon: HistoryIcon },
   { label: "Agendamentos", to: "/schedules", Icon: ScheduleIcon },
+  { label: "Notificações", to: "/notifications", Icon: BellIcon },
   { label: "Variáveis", to: "/variables", Icon: VariableIcon },
   { label: "Secrets", to: "/secrets", Icon: SecretIcon },
 ];

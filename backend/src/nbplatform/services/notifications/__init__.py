@@ -1,9 +1,11 @@
-"""Serviço centralizado de notificações (spec §1).
+"""Central de Notificações (spec §1).
 
-Job FAILED → NotificationService → providers (Email, Bitrix) → histórico.
-Desacoplado: os Jobs só chamam `NotificationService.enqueue_job_event(...)`.
+Job/Workflow FAILED → `NotificationService.notify(event)` → providers globais
+ativos (Email, Bitrix) → `NotificationDelivery`. Desacoplado: os Jobs só emitem
+um `NotificationEvent`; novos providers entram pelo `NotificationProviderRegistry`.
 """
 
+from nbplatform.services.notifications.interface import INotificationService
 from nbplatform.services.notifications.service import NotificationService
 
-__all__ = ["NotificationService"]
+__all__ = ["INotificationService", "NotificationService"]

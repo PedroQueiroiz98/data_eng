@@ -10,6 +10,7 @@ export { EmptyState } from "@/ui/EmptyState";
 export { Skeleton, SkeletonRows } from "@/ui/Skeleton";
 export { ActionMenu, type MenuItem } from "@/ui/Menu";
 export { Dialog } from "@/ui/Dialog";
+export { Drawer } from "@/ui/Drawer";
 export { TextField, SelectField, TextArea, Switch } from "@/ui/Field";
 export { ToastProvider, useToast } from "@/ui/Toast";
 export { ConfirmProvider, useConfirm, useAlert } from "@/ui/ConfirmDialog";

@@ -19,7 +19,7 @@ from nbplatform.core.config import get_settings
 from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import ExecutionStatus
 from nbplatform.domain.notifications import NotificationStatus
-from nbplatform.models.notification import Notification
+from nbplatform.models.notification import NotificationDelivery
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.queue.notification_queue import NotificationQueue
 from nbplatform.services.execution_service import ExecutionService
@@ -100,13 +100,13 @@ async def recover_stale_notifications(redis: Redis) -> int:
     async with session_scope() as session:
         stale = (
             await session.scalars(
-                select(Notification).where(
-                    Notification.status == NotificationStatus.SENDING,
+                select(NotificationDelivery).where(
+                    NotificationDelivery.status == NotificationStatus.SENDING,
                     or_(
-                        Notification.sending_since < cutoff,
+                        NotificationDelivery.sending_since < cutoff,
                         and_(
-                            Notification.sending_since.is_(None),
-                            Notification.created_at < cutoff,
+                            NotificationDelivery.sending_since.is_(None),
+                            NotificationDelivery.created_at < cutoff,
                         ),
                     ),
                 )

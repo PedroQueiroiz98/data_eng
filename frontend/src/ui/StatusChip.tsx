@@ -37,6 +37,9 @@ const MAP: Record<string, Spec> = {
   // schedule
   SCHEDULED: { label: "Scheduled", cls: "bg-primary/15 text-primary", Icon: TimeoutIcon },
   ENABLED: { label: "Ativo", cls: "bg-ok/15 text-ok", Icon: CheckIcon },
+  // notification deliveries
+  SENT: { label: "Sent", cls: "bg-ok/15 text-ok", Icon: SuccessIcon },
+  SENDING: { label: "Sending", cls: "bg-info/15 text-info", Icon: RunningIcon, spin: true },
 };
 
 const FALLBACK: Spec = { label: "—", cls: "bg-fg/10 text-fg-muted", Icon: QueuedIcon };
@@ -45,7 +48,9 @@ const TONE: Record<string, string> = {
   SUCCESS: "text-ok",
   ACTIVE: "text-ok",
   ENABLED: "text-ok",
+  SENT: "text-ok",
   RUNNING: "text-info",
+  SENDING: "text-info",
   FAILED: "text-danger",
   TIMEOUT: "text-warn",
   SKIPPED: "text-warn",

@@ -21,4 +21,15 @@ describe("StatusChip", () => {
     render(<StatusChip status="WHATEVER" />);
     expect(screen.getByText("WHATEVER")).toBeInTheDocument();
   });
+
+  it("cobre os status de delivery de notificação", () => {
+    const { rerender } = render(<StatusChip status="SENT" />);
+    expect(screen.getByText("Sent")).toBeInTheDocument();
+    rerender(<StatusChip status="SENDING" />);
+    expect(screen.getByText("Sending")).toBeInTheDocument();
+    rerender(<StatusChip status="PENDING" />);
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    rerender(<StatusChip status="FAILED" />);
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
 });

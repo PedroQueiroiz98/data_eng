@@ -5,7 +5,6 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,8 +56,10 @@ class Settings(BaseSettings):
     lsp_max_source_chars: int = 200_000
     lsp_max_completions: int = 100
 
-    # ─── Notificações ───
-    # URL pública da aplicação (para o link "View Execution" nas notificações).
+    # ─── Central de Notificações ───
+    # Providers (EMAIL/BITRIX) e seus secrets são configurados 100% pela UI
+    # (/notifications) e persistidos no banco. Aqui só ficam parâmetros de
+    # retry/timeout e a URL pública da app (link "Abrir execução").
     app_base_url: str = "http://localhost:5173"
     notification_max_attempts: int = 3
     notification_retry_initial_delay_s: float = 5.0
@@ -68,28 +69,6 @@ class Settings(BaseSettings):
     # janela após a qual uma notificação presa em SENDING é considerada abandonada
     # (worker morreu no meio do envio) e volta para a fila pelo recovery.
     notification_stale_after_s: float = 120.0
-    # Fallbacks de infraestrutura (usados quando o NotificationSettings do banco
-    # não preenche o campo). Secrets NUNCA voltam para o frontend.
-    notify_smtp_host: str = ""
-    notify_smtp_port: int = 587
-    notify_smtp_username: str = ""
-    notify_smtp_password: str = ""
-    notify_smtp_from: str = ""
-    notify_smtp_use_tls: bool = True
-    # Bot padrão = InvitaBot (BitrixBotConfig). Método v2 do messenger.
-    notify_bitrix_url: str = Field(
-        default="", validation_alias=AliasChoices("NOTIFY_BITRIX_URL", "BITRIX_URL")
-    )
-    notify_bitrix_send_message_path: str = "/rest/imbot.v2.Chat.Message.send"
-    notify_bitrix_bot_id: str = "93"
-    notify_bitrix_bot_token: str = Field(
-        default="",
-        validation_alias=AliasChoices("NOTIFY_BITRIX_BOT_TOKEN", "BITRIX_BOT_TOKEN"),
-    )
-    # Fallback global: notifica falha de pipelines sem config própria.
-    notify_default_on_failure: bool = False
-    notify_default_email_recipients: str = ""  # separados por vírgula
-    notify_default_bitrix_dialog_id: str = ""
 
     redis_queue_notifications: str = "nbp:queue:notifications"
     redis_queue_notifications_processing: str = "nbp:queue:notifications:processing"

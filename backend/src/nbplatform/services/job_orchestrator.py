@@ -22,7 +22,7 @@ from nbplatform.domain.enums import (
     TriggerType,
 )
 from nbplatform.domain.job_state import JOBTASK_BLOCKING_FAILURE, JOBTASK_TERMINAL
-from nbplatform.domain.notifications import NotificationEvent
+from nbplatform.domain.notifications import NotificationEvent, NotificationEventType
 from nbplatform.models.job import Job, JobLog, JobTask
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.repositories.execution_repository import ExecutionRepository
@@ -223,15 +223,49 @@ class JobOrchestrator:
         return final_status
 
     async def _notify_final(self, job_id: uuid.UUID, status: JobStatus) -> None:
-        """Dispara o NotificationService no ponto central de falha (spec §19)."""
+        """Ponto central de notificação de falha (spec §20/§21).
+
+        Emite WORKFLOW_FAILED (run) + JOB_FAILED por JobTask que falhou. Nunca
+        levanta — o resultado do Job é independente das notificações.
+        """
         if status != JobStatus.FAILED:
             return
         try:
             from nbplatform.services.notifications import NotificationService
 
-            await NotificationService(self.redis).enqueue_job_event(
-                job_id, NotificationEvent.JOB_FAILED
+            async with session_scope() as session:
+                job = await session.get(Job, job_id)
+                if job is None:
+                    return
+                workflow_id = job.workflow_id
+                finished_at = job.finished_at or _now()
+                tasks = await JobRepository(session).tasks_for(job_id)
+                failed = [
+                    (t.id, t.execution_id, t.finished_at)
+                    for t in tasks
+                    if t.status == JobTaskStatus.FAILED
+                ]
+
+            svc = NotificationService(self.redis)
+            await svc.notify(
+                NotificationEvent(
+                    event_type=NotificationEventType.WORKFLOW_FAILED,
+                    occurred_at=finished_at,
+                    workflow_id=workflow_id,
+                    job_id=job_id,
+                )
             )
+            for task_id, execution_id, task_finished in failed:
+                await svc.notify(
+                    NotificationEvent(
+                        event_type=NotificationEventType.JOB_FAILED,
+                        occurred_at=task_finished or finished_at,
+                        workflow_id=workflow_id,
+                        job_id=job_id,
+                        execution_id=execution_id,
+                        job_task_id=task_id,
+                    )
+                )
         except Exception:  # noqa: BLE001 - notificação nunca altera o resultado do Job
             logger.exception(
                 "falha ao acionar notificações", extra={"job_id": str(job_id)}

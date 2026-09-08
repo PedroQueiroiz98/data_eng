@@ -13,7 +13,6 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { NotificationConfigDialog } from "@/components/notifications/NotificationConfigDialog";
 import { TaskNode, type TaskNodeData } from "@/components/workflow/TaskNode";
 import { useTheme } from "@/components/ThemeProvider";
 import { useRunWorkflow } from "@/hooks/useJobs";
@@ -65,7 +64,6 @@ function EditorInner({ id }: { id: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [showNotif, setShowNotif] = useState(false);
 
   const notebookName = useCallback(
     (nid: string | null) => notebooks?.find((n) => n.id === nid)?.name ?? null,
@@ -183,9 +181,9 @@ function EditorInner({ id }: { id: string }) {
               onClick={removeSelected}
             />
             <IconButton
-              label="Notificações do pipeline"
+              label="Central de Notificações"
               icon={<BellIcon className="h-4 w-4" />}
-              onClick={() => setShowNotif(true)}
+              onClick={() => navigate(`/notifications?workflow_id=${id}&tab=history`)}
             />
             <Button
               variant="outlined"
@@ -302,12 +300,6 @@ function EditorInner({ id }: { id: string }) {
         </aside>
       </div>
 
-      <NotificationConfigDialog
-        workflowId={id}
-        workflowName={wf.name}
-        open={showNotif}
-        onClose={() => setShowNotif(false)}
-      />
     </div>
   );
 }

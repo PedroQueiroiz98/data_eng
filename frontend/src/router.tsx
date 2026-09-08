@@ -9,6 +9,7 @@ import { Jobs } from "@/pages/Jobs";
 import { Login } from "@/pages/Login";
 import { NotebookEditor } from "@/pages/NotebookEditor";
 import { Notebooks } from "@/pages/Notebooks";
+import { NotificationsPage } from "@/pages/NotificationsPage";
 import { Schedules } from "@/pages/Schedules";
 import { Workspace } from "@/pages/Workspace";
 import { Workspaces } from "@/pages/Workspaces";
@@ -41,6 +42,7 @@ export const router = createBrowserRouter(
             { path: "executions", element: <Executions /> },
             { path: "executions/:id", element: <ExecutionDetail /> },
             { path: "schedules", element: <Schedules /> },
+            { path: "notifications", element: <NotificationsPage /> },
             { path: "variables", element: <Variables /> },
             { path: "secrets", element: <Secrets /> },
             { path: "settings", element: <Settings /> },

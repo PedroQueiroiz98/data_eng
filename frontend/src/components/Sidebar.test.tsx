@@ -18,11 +18,16 @@ describe("Sidebar", () => {
       "Jobs",
       "Execuções",
       "Agendamentos",
+      "Notificações",
       "Variáveis",
       "Secrets",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+    expect(screen.getByText("Notificações").closest("a")).toHaveAttribute(
+      "href",
+      "/notifications",
+    );
     // sem cabeçalhos de grupo
     expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
     expect(screen.queryByText("Administração")).not.toBeInTheDocument();

@@ -58,10 +58,15 @@ export default {
           "50%": { transform: "translateX(20%) scaleX(0.6)" },
           "100%": { transform: "translateX(120%) scaleX(0.4)" },
         },
+        "slide-in-right": {
+          from: { opacity: "0", transform: "translateX(16px)" },
+          to: { opacity: "1", transform: "translateX(0)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 120ms ease-out both",
         "slide-up": "slide-up 160ms cubic-bezier(0.2,0,0,1) both",
+        "slide-in-right": "slide-in-right 180ms cubic-bezier(0.2,0,0,1) both",
         "indeterminate": "indeterminate 1.4s ease-in-out infinite",
       },
     },

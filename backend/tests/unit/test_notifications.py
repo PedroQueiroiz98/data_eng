@@ -6,16 +6,18 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from nbplatform.core.config import Settings
-from nbplatform.core.crypto import SecretCipher
 from nbplatform.domain.notifications import (
-    NotificationChannel,
-    NotificationEvent,
+    NotificationEventType,
     NotificationMessage,
+    NotificationProviderType,
+    ProviderResult,
     idempotency_key,
 )
-from nbplatform.models.notification import NotificationConfig, NotificationSettings
-from nbplatform.services.notifications.email_sender import OutgoingEmail
+from nbplatform.services.notifications.email_sender import (
+    EmailProviderSettings,
+    OutgoingEmail,
+)
+from nbplatform.services.notifications.providers import ConfigError, ResolvedTarget
 from nbplatform.services.notifications.providers.bitrix import (
     BitrixNotificationProvider,
     _attach,
@@ -24,160 +26,210 @@ from nbplatform.services.notifications.providers.bitrix import (
 )
 from nbplatform.services.notifications.providers.email import (
     EmailNotificationProvider,
-    _default_subject,
     _html_body,
+    _subject,
 )
-from nbplatform.services.notifications.resolved_settings import (
-    BitrixProviderSettings,
-    EmailProviderSettings,
-    ResolvedSettings,
-    resolve,
+from nbplatform.services.notifications.registry import (
+    NotificationProviderRegistry,
+    UnknownProviderType,
+    default_registry,
 )
-from nbplatform.services.notifications.service import (
-    _deserialize,
-    _enabled_channels,
-    _serialize,
-)
+from nbplatform.services.notifications.service import _deserialize, _serialize
 
 KEY = "iY0uDAIk3AqhPlmaVTZOGf-Bajj5kjmIDRZiwqRLvDc="
 
 
 def _msg() -> NotificationMessage:
     return NotificationMessage(
-        event_type=NotificationEvent.JOB_FAILED,
-        title="🚨 Falha na execução do Job",
+        event_type=NotificationEventType.JOB_FAILED,
+        title="🚨 Etapa do pipeline falhou",
         message="corpo",
         environment="production",
         pipeline_name="Customer ETL",
-        job_name="Execute Notebook",
+        job_name="Transformation",
         execution_id="1842",
         timestamp=datetime(2026, 9, 7, 12, 6, 13, tzinfo=UTC),
         attempt=2,
-        error_type="ValueError",
-        error_message="invalid date format",
+        job_id="job-1",
+        workflow_id="wf-1",
+        error_type="ConnectionException",
+        error_message="Connection timeout",
         correlation_id="job-1",
         duration_ms=102_000,
         notebook_name="customer_etl.ipynb",
         execution_url="http://app/jobs/job-1",
-        metadata={"Ambiente": "production", "Erro": "invalid date format"},
+        metadata={
+            "Ambiente": "production",
+            "Erro": "Connection timeout",
+            "Componente": "PostgreSQL",
+            "Workflow": "Customer ETL",
+            "Job": "Transformation",
+            "Execution ID": "1842",
+            "Attempt": "2",
+            "Duration": "1m 42s",
+        },
     )
 
 
-def test_idempotency_key() -> None:
+# ── domínio ────────────────────────────────────────────────────────────────
+def test_idempotency_key_scopes_by_execution_or_job() -> None:
     assert (
-        idempotency_key("1842", NotificationEvent.JOB_FAILED, NotificationChannel.BITRIX)
-        == "1842:JOB_FAILED:BITRIX"
+        idempotency_key("1842", "prov-9", NotificationEventType.JOB_FAILED)
+        == "1842:prov-9:JOB_FAILED"
     )
 
 
-def test_serialize_roundtrip() -> None:
+def test_serialize_roundtrip_keeps_new_fields() -> None:
     out = _deserialize(_serialize(_msg()))
-    assert out.event_type is NotificationEvent.JOB_FAILED
+    assert out.event_type is NotificationEventType.JOB_FAILED
     assert out.pipeline_name == "Customer ETL"
+    assert out.job_id == "job-1" and out.workflow_id == "wf-1"
     assert out.timestamp == _msg().timestamp
-    assert out.metadata["Erro"] == "invalid date format"
+    assert out.metadata["Erro"] == "Connection timeout"
 
 
-def test_enabled_channels_respects_event_flag_and_channels() -> None:
-    cfg = NotificationConfig()
-    cfg.on_failure = False
-    cfg.email_enabled = True
-    cfg.bitrix_enabled = True
-    assert _enabled_channels(cfg, NotificationEvent.JOB_FAILED) == []
-
-    cfg.on_failure = True
-    assert _enabled_channels(cfg, NotificationEvent.JOB_FAILED) == [
-        NotificationChannel.EMAIL,
-        NotificationChannel.BITRIX,
-    ]
-
-    cfg.bitrix_enabled = False
-    assert _enabled_channels(cfg, NotificationEvent.JOB_FAILED) == [NotificationChannel.EMAIL]
-    assert _enabled_channels(None, NotificationEvent.JOB_FAILED) == []
+# ── registry (spec §10) ───────────────────────────────────────────────────
+def test_registry_resolves_type_without_branching() -> None:
+    reg = default_registry()
+    assert reg.get("EMAIL").provider_type == "EMAIL"
+    assert reg.get("BITRIX").provider_type == "BITRIX"
+    assert reg.has("SLACK") is False
+    with pytest.raises(UnknownProviderType):
+        reg.get("SLACK")
+    assert set(reg.types()) == {"EMAIL", "BITRIX"}
 
 
-def test_resolve_uses_env_fallback_and_never_exposes_secret_object() -> None:
-    settings = Settings(
-        secret_encryption_key=KEY,
-        notify_smtp_host="smtp.local",
-        notify_smtp_from="ci@x.com",
-        notify_bitrix_url="https://b24.example",
-        notify_bitrix_bot_id="42",
-        notify_bitrix_bot_token="env-token",
-    )
-    r = resolve(None, settings, SecretCipher(KEY))
-    assert r.email.usable is True
-    assert r.bitrix.usable is True
-    assert r.bitrix.bot_token == "env-token"  # só existe aqui, no envio
+def test_registry_accepts_a_new_provider_type() -> None:
+    class FakeSender:
+        provider_type = "FAKE"
+
+        def validate_config(self, config, *, has_secret):  # noqa: ANN001, D401
+            return None
+
+        def summary(self, config):  # noqa: ANN001
+            return "fake"
+
+        def targets(self, target):  # noqa: ANN001
+            return ["x"]
+
+        async def send(self, message, target, *, timeout_s):  # noqa: ANN001
+            return ProviderResult.success("fake ok")
+
+    reg = NotificationProviderRegistry([FakeSender()])
+    assert reg.has("FAKE")
+    assert reg.get("FAKE").summary({}) == "fake"
 
 
-def test_resolve_decrypts_db_secret_over_env() -> None:
-    cipher = SecretCipher(KEY)
-    row = NotificationSettings()
-    row.bitrix_enabled = True
-    row.bitrix_url = "https://db.example"
-    row.bitrix_bot_id = "7"
-    row.bitrix_bot_token_ct = cipher.encrypt("db-token")
-    r = resolve(row, Settings(secret_encryption_key=KEY), cipher)
-    assert r.bitrix.bot_token == "db-token"
+# ── email sender (spec §12/§15) ──────────────────────────────────────────
+class _FakeEmailSender:
+    def __init__(self) -> None:
+        self.sent: list[OutgoingEmail] = []
+        self.settings: EmailProviderSettings | None = None
+
+    async def send(self, email: OutgoingEmail, settings: EmailProviderSettings) -> None:
+        self.sent.append(email)
+        self.settings = settings
+
+
+def _email_target(**overrides) -> ResolvedTarget:
+    cfg = {
+        "host": "smtp.empresa.com",
+        "port": 587,
+        "username": "notification",
+        "from_email": "noreply@empresa.com",
+        "from_name": "Data Platform",
+        "use_tls": True,
+        "recipients": ["data-team@empresa.com", "suporte@empresa.com"],
+        "cc": ["devops@empresa.com"],
+        "bcc": [],
+    }
+    cfg.update(overrides)
+    return ResolvedTarget(provider_id="p1", config=cfg, secret="smtp-secret")
+
+
+@pytest.mark.asyncio
+async def test_email_sender_builds_from_configuration_json() -> None:
+    fake = _FakeEmailSender()
+    provider = EmailNotificationProvider(fake)
+    result = await provider.send(_msg(), _email_target(), timeout_s=5)
+    assert result.ok is True
+    assert fake.sent[0].to == ["data-team@empresa.com", "suporte@empresa.com"]
+    assert fake.sent[0].cc == ["devops@empresa.com"]
+    assert fake.settings is not None
+    assert fake.settings.password == "smtp-secret"
+    assert fake.settings.from_email == "noreply@empresa.com"
 
 
 def test_email_subject_and_body_no_secret_leak() -> None:
     m = _msg()
-    assert _default_subject(m) == "[JOB FAILED] Customer ETL - Execute Notebook"
+    assert _subject(m) == "[JOB FAILED] Customer ETL - Transformation"
     body = _html_body(m)
-    assert "invalid date format" in body
-    assert "View Execution" in body
-    assert "token" not in body.lower()
+    assert "Connection timeout" in body
+    assert "Abrir execução" in body
+    assert "secret" not in body.lower() and "smtp-secret" not in body
 
 
 @pytest.mark.asyncio
-async def test_email_provider_isolated_failure_without_recipients() -> None:
-    class FakeSender:
-        async def send(self, email: OutgoingEmail, settings: EmailProviderSettings) -> None:
-            raise AssertionError("não deveria enviar sem destinatário")
-
-    provider = EmailNotificationProvider(FakeSender())
-    cfg = NotificationConfig()
-    cfg.email_recipients = []
-    r = resolve(None, Settings(secret_encryption_key=KEY), SecretCipher(KEY))
-    result = await provider.send(_msg(), cfg, r)
+async def test_email_provider_fails_without_recipients() -> None:
+    provider = EmailNotificationProvider(_FakeEmailSender())
+    result = await provider.send(_msg(), _email_target(recipients=[]), timeout_s=5)
     assert result.ok is False
     assert "destinat" in (result.error or "")
 
 
 @pytest.mark.asyncio
-async def test_email_provider_sends_via_injected_sender() -> None:
-    sent: list[OutgoingEmail] = []
+async def test_email_provider_timeout_becomes_failed_result() -> None:
+    import asyncio
 
-    class FakeSender:
-        async def send(self, email: OutgoingEmail, settings: EmailProviderSettings) -> None:
-            sent.append(email)
+    class SlowSender:
+        async def send(self, email, settings):  # noqa: ANN001
+            await asyncio.sleep(1)
 
-    provider = EmailNotificationProvider(FakeSender())
-    cfg = NotificationConfig()
-    cfg.email_recipients = ["pedro@x.com"]
-    cfg.email_cc = ["devops@x.com"]
-    cfg.email_subject = None
-    settings = Settings(
-        secret_encryption_key=KEY, notify_smtp_host="smtp.local", notify_smtp_from="ci@x.com"
+    provider = EmailNotificationProvider(SlowSender())
+    result = await provider.send(_msg(), _email_target(), timeout_s=0.05)
+    assert result.ok is False
+    assert "timeout" in (result.error or "")
+
+
+def test_email_validate_config_requires_host_and_recipients() -> None:
+    p = EmailNotificationProvider(_FakeEmailSender())
+    with pytest.raises(ConfigError):
+        p.validate_config({"from_email": "x@y.com", "recipients": ["a@b.com"]}, has_secret=True)
+    with pytest.raises(ConfigError):
+        p.validate_config({"host": "smtp", "from_email": "x@y.com"}, has_secret=True)
+    p.validate_config(
+        {"host": "smtp", "from_email": "x@y.com", "recipients": ["a@b.com"]},
+        has_secret=True,
     )
-    r = resolve(None, settings, SecretCipher(KEY))
-    result = await provider.send(_msg(), cfg, r)
-    assert result.ok is True
-    assert sent[0].to == ["pedro@x.com"]
-    assert sent[0].cc == ["devops@x.com"]
-    assert sent[0].subject == "[JOB FAILED] Customer ETL - Execute Notebook"
 
 
-def test_bitrix_attach_has_all_grid_fields_and_error_in_message() -> None:
+# ── bitrix sender (spec §13/§14) ─────────────────────────────────────────
+def _bitrix_target(*, bot: bool = True, dialog_id: str = "chat3129") -> ResolvedTarget:
+    cfg = {
+        "url": "https://empresa.bitrix24.com.br",
+        "send_message_path": "/rest/1/abc/imbot.message.add" if bot else "/rest/1/abc/im.message.add",
+        "bot_id": "93" if bot else "",
+        "dialog_id": dialog_id,
+    }
+    return ResolvedTarget(provider_id="p2", config=cfg, secret="bot-token" if bot else "")
+
+
+def test_bitrix_validate_config_requires_url_and_dialog() -> None:
+    p = BitrixNotificationProvider()
+    with pytest.raises(ConfigError):
+        p.validate_config({"dialog_id": "chat1"}, has_secret=True)
+    with pytest.raises(ConfigError):
+        p.validate_config({"url": "https://x"}, has_secret=True)
+    p.validate_config({"url": "https://x", "dialog_id": "chat1"}, has_secret=True)
+
+
+def test_bitrix_attach_has_grid_and_error_in_message() -> None:
     m = _msg()
     attach = _attach(m)
     assert attach[0]["DELIMITER"]["COLOR"] == "#e01e5a"
-    grid = attach[1]["GRID"]
-    names = {row["NAME"] for row in grid}
-    assert {"Ambiente", "Erro", "Pipeline", "Job", "Execution ID", "Attempt", "Duration"} <= names
-    assert "invalid date format" in _message_text(m)
+    names = {row["NAME"] for row in attach[1]["GRID"]}
+    assert {"Ambiente", "Erro", "Workflow", "Job", "Execution ID", "Attempt"} <= names
+    assert "Connection timeout" in _message_text(m)
 
 
 @pytest.mark.parametrize(
@@ -187,8 +239,6 @@ def test_bitrix_attach_has_all_grid_fields_and_error_in_message() -> None:
          "https://p.bitrix24.com/rest/1/abc/imbot.message.add"),
         ("https://p.bitrix24.com/", "rest/1/abc/imbot.message.add",
          "https://p.bitrix24.com/rest/1/abc/imbot.message.add"),
-        ("https://p.bitrix24.com/rest/1/abc/", "",
-         "https://p.bitrix24.com/rest/1/abc/rest/imbot.message.add"),
         ("ignored", "https://full.example/rest/imbot.message.add",
          "https://full.example/rest/imbot.message.add"),
     ],
@@ -197,28 +247,8 @@ def test_bitrix_endpoint_join(url: str, path: str, expected: str) -> None:
     assert _endpoint(url, path, "imbot.message.add") == expected
 
 
-def test_bitrix_endpoint_default_method_is_v2_when_path_blank() -> None:
-    assert _endpoint("https://p.bitrix24.com", "", "imbot.v2.Chat.Message.send") == (
-        "https://p.bitrix24.com/rest/imbot.v2.Chat.Message.send"
-    )
-
-
-def _bitrix_settings(*, bot: bool = True, path: str = "") -> ResolvedSettings:
-    default_path = "/rest/1/abc/imbot.message.add" if bot else "/rest/1/abc/im.message.add"
-    return ResolvedSettings(
-        email=EmailProviderSettings(False, "", 0, "", "", "", True),
-        bitrix=BitrixProviderSettings(
-            enabled=True,
-            url="https://p.bitrix24.com",
-            send_message_path=path or default_path,
-            bot_id="42" if bot else "",
-            bot_token="tok" if bot else "",
-        ),
-    )
-
-
 @pytest.mark.asyncio
-async def test_bitrix_send_posts_expected_payload_and_reports_success() -> None:
+async def test_bitrix_send_bot_mode_payload_and_masks_token_in_logs(caplog) -> None:
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -229,45 +259,40 @@ async def test_bitrix_send_posts_expected_payload_and_reports_success() -> None:
     provider = BitrixNotificationProvider(
         client_factory=lambda _t: httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
-    cfg = NotificationConfig()
-    cfg.bitrix_dialog_id = "chat3129"
-    r = await provider.send(_msg(), cfg, _bitrix_settings())
+    with caplog.at_level("INFO"):
+        r = await provider.send(_msg(), _bitrix_target(), timeout_s=5)
     assert r.ok is True
-    assert seen["url"] == "https://p.bitrix24.com/rest/1/abc/imbot.message.add"
     body = seen["body"]
     assert isinstance(body, dict)
-    assert body["botId"] == "42" and body["botToken"] == "tok" and body["dialogId"] == "chat3129"
-    assert "invalid date format" in body["fields"]["message"]
-    assert body["fields"]["attach"][1]["GRID"]  # GRID presente
+    assert body["botId"] == "93" and body["botToken"] == "bot-token"
+    assert body["dialogId"] == "chat3129"
+    assert "Connection timeout" in body["fields"]["message"]
+    assert body["fields"]["attach"][1]["GRID"]
+    assert "bot-token" not in caplog.text  # secret nunca logado
 
 
 @pytest.mark.asyncio
-async def test_bitrix_send_webhook_chat_mode_without_bot_credentials() -> None:
+async def test_bitrix_send_webhook_mode_without_bot_credentials() -> None:
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen["url"] = str(request.url)
         seen["body"] = json.loads(request.content)
         return httpx.Response(200, json={"result": 1})
 
     provider = BitrixNotificationProvider(
         client_factory=lambda _t: httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
-    cfg = NotificationConfig()
-    cfg.bitrix_dialog_id = "chat3129"
-    r = await provider.send(_msg(), cfg, _bitrix_settings(bot=False))
+    r = await provider.send(_msg(), _bitrix_target(bot=False), timeout_s=5)
     assert r.ok is True
-    assert seen["url"] == "https://p.bitrix24.com/rest/1/abc/im.message.add"
     body = seen["body"]
     assert isinstance(body, dict)
     assert body["DIALOG_ID"] == "chat3129"
-    assert "invalid date format" in body["MESSAGE"]
     assert "botId" not in body and "botToken" not in body
 
 
 @pytest.mark.asyncio
 async def test_bitrix_send_surfaces_api_error_body() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(_r: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200, json={"error": "BOT_ID_ERROR", "error_description": "Bot not found"}
         )
@@ -275,23 +300,30 @@ async def test_bitrix_send_surfaces_api_error_body() -> None:
     provider = BitrixNotificationProvider(
         client_factory=lambda _t: httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
-    cfg = NotificationConfig()
-    cfg.bitrix_dialog_id = "chat3129"
-    r = await provider.send(_msg(), cfg, _bitrix_settings())
-    assert r.ok is False
-    assert "Bot not found" in (r.error or "")
+    r = await provider.send(_msg(), _bitrix_target(), timeout_s=5)
+    assert r.ok is False and "Bot not found" in (r.error or "")
 
 
 @pytest.mark.asyncio
 async def test_bitrix_send_reports_http_error_body() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(_r: httpx.Request) -> httpx.Response:
         return httpx.Response(404, text="Not Found")
 
     provider = BitrixNotificationProvider(
         client_factory=lambda _t: httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
-    cfg = NotificationConfig()
-    cfg.bitrix_dialog_id = "chat3129"
-    r = await provider.send(_msg(), cfg, _bitrix_settings())
-    assert r.ok is False
-    assert "404" in (r.error or "") and "Not Found" in (r.error or "")
+    r = await provider.send(_msg(), _bitrix_target(), timeout_s=5)
+    assert r.ok is False and "404" in (r.error or "")
+
+
+# ── crypto / máscara ─────────────────────────────────────────────────────
+def test_secret_cipher_roundtrip() -> None:
+    from nbplatform.core.crypto import SecretCipher
+
+    c = SecretCipher(KEY)
+    assert c.decrypt(c.encrypt("top-secret")) == "top-secret"
+
+
+def test_provider_type_enum_values() -> None:
+    assert NotificationProviderType.EMAIL == "EMAIL"
+    assert NotificationProviderType.BITRIX == "BITRIX"

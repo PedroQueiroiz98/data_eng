@@ -13,7 +13,26 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Protocol
 
-from nbplatform.services.notifications.resolved_settings import EmailProviderSettings
+
+@dataclass(frozen=True)
+class EmailProviderSettings:
+    """SMTP resolvido para um envio. `password` só existe aqui, decifrado."""
+
+    host: str
+    port: int
+    username: str
+    password: str
+    from_email: str
+    from_name: str
+    use_tls: bool
+
+    @property
+    def sender(self) -> str:
+        return f"{self.from_name} <{self.from_email}>" if self.from_name else self.from_email
+
+    @property
+    def usable(self) -> bool:
+        return bool(self.host and self.from_email)
 
 
 @dataclass(frozen=True)
@@ -57,4 +76,4 @@ class SmtpEmailSender:
                 smtp.starttls(context=ssl.create_default_context())
             if settings.username and settings.password:
                 smtp.login(settings.username, settings.password)
-            smtp.send_message(msg, from_addr=settings.sender, to_addrs=recipients)
+            smtp.send_message(msg, from_addr=settings.from_email, to_addrs=recipients)

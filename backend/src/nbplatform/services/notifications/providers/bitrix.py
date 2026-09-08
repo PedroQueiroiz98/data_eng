@@ -1,17 +1,18 @@
-"""Provider Bitrix (spec §5/§6).
+"""Sender Bitrix (spec §13/§14).
 
-Porta o `BitrixService` de referência.
-- **bot** (BitrixBotConfig / InvitaBot): `POST {Url}/rest/imbot.v2.Chat.Message.send`
-  com `{botId, botToken, dialogId, fields:{message, attach}}`.
-- **webhook de chat** (sem Bot ID/Token): `POST {Url}/rest/im.message.add` com
-  `{DIALOG_ID, MESSAGE, ATTACH}`.
-JSON UTF-8, `Accept: application/json`. Sucesso = 2xx sem `error` no corpo.
-Falha → `ProviderResult` com o corpo real da resposta; request e response são
-sempre logados (`botToken` mascarado).
+Toda a config vem de `configuration_json` (`url`, `send_message_path`, `bot_id`,
+`dialog_id`) + o token em `secret`.
+- **bot** (Bot ID + Token): `POST {url}/rest/imbot.v2.Chat.Message.send` com
+  `{botId, botToken, dialogId, fields:{message, attach}}`.
+- **webhook de chat** (sem Bot ID/Token): `POST {url}/rest/im.message.add` com
+  `{DIALOG_ID, MESSAGE, ATTACH}` (auth já no path do webhook).
+Sucesso = 2xx sem `error` no corpo. Request e response sempre logados
+(`botToken` mascarado, segmento de webhook redigido).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -20,14 +21,12 @@ from typing import Any
 
 import httpx
 
-from nbplatform.core.config import get_settings
-from nbplatform.domain.notifications import (
-    NotificationChannel,
-    NotificationMessage,
-    ProviderResult,
+from nbplatform.domain.notifications import NotificationMessage, ProviderResult
+from nbplatform.services.notifications.providers.base import (
+    ConfigError,
+    NotificationSender,
+    ResolvedTarget,
 )
-from nbplatform.models.notification import NotificationConfig
-from nbplatform.services.notifications.resolved_settings import ResolvedSettings
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,12 @@ _GRID_FIELDS = (
     "Data/Hora",
     "Event ID",
     "Correlation ID",
-    "Pipeline",
+    "Workflow",
     "Job",
     "Execution ID",
     "Attempt",
     "Duration",
 )
-
 
 ClientFactory = Callable[[float], httpx.AsyncClient]
 
@@ -54,49 +52,63 @@ def _default_client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout)
 
 
-class BitrixNotificationProvider:
-    type = NotificationChannel.BITRIX.value
+class BitrixNotificationProvider(NotificationSender):
+    provider_type = "BITRIX"
 
     def __init__(self, client_factory: ClientFactory | None = None) -> None:
         self._client_factory = client_factory or _default_client
 
-    def targets(self, config: NotificationConfig) -> list[str]:
-        return [config.bitrix_dialog_id] if config.bitrix_dialog_id else []
+    # ── config ───────────────────────────────────────────────────────────
+    def validate_config(self, config: dict[str, Any], *, has_secret: bool) -> None:
+        if not str(config.get("url") or "").strip():
+            raise ConfigError("URL do Bitrix é obrigatória.")
+        if not str(config.get("dialog_id") or "").strip():
+            raise ConfigError("Dialog ID é obrigatório.")
 
+    def summary(self, config: dict[str, Any]) -> str:
+        return f"canal {config.get('dialog_id') or '—'}"
+
+    def targets(self, target: ResolvedTarget) -> list[str]:
+        dialog = str(target.config.get("dialog_id") or "").strip()
+        return [dialog] if dialog else []
+
+    # ── envio ────────────────────────────────────────────────────────────
     async def send(
         self,
         message: NotificationMessage,
-        config: NotificationConfig,
-        settings: ResolvedSettings,
+        target: ResolvedTarget,
+        *,
+        timeout_s: float,
     ) -> ProviderResult:
-        dialog_id = (config.bitrix_dialog_id or "").strip()
+        c = target.config
+        url = str(c.get("url") or "").strip()
+        dialog_id = str(c.get("dialog_id") or "").strip()
+        bot_id = str(c.get("bot_id") or "").strip()
+        token = target.secret
+        path = str(c.get("send_message_path") or "").strip()
+        if not url:
+            return ProviderResult.failure("URL do Bitrix não configurada")
         if not dialog_id:
             return ProviderResult.failure("dialog_id não configurado")
-        if not settings.bitrix.usable:
-            return ProviderResult.failure("configuração global do Bitrix incompleta")
 
-        b = settings.bitrix
+        bot_mode = bool(bot_id and token)
         text = _message_text(message)
         attach = _attach(message)
 
-        if b.bot_mode:
-            # fluxo de bot (referência BitrixBotConfig): imbot.v2.Chat.Message.send
-            endpoint = _endpoint(b.url, b.send_message_path, "imbot.v2.Chat.Message.send")
+        if bot_mode:
+            endpoint = _endpoint(url, path, "imbot.v2.Chat.Message.send")
             payload: dict[str, Any] = {
-                "botId": b.bot_id,
-                "botToken": b.bot_token,
+                "botId": bot_id,
+                "botToken": token,
                 "dialogId": dialog_id,
                 "fields": {"message": text, "attach": attach},
             }
         else:
-            # webhook de chat: im.message.add (auth já vai no path do webhook)
-            endpoint = _endpoint(b.url, b.send_message_path, "im.message.add")
+            endpoint = _endpoint(url, path, "im.message.add")
             payload = {"DIALOG_ID": dialog_id, "MESSAGE": text, "ATTACH": attach}
 
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        timeout = get_settings().notification_send_timeout_s
-        mode = "bot" if b.bot_mode else "webhook"
-
+        mode = "bot" if bot_mode else "webhook"
         logger.info(
             "Bitrix request",
             extra={
@@ -109,13 +121,16 @@ class BitrixNotificationProvider:
 
         started = time.perf_counter()
         try:
-            async with self._client_factory(timeout) as client:
-                resp = await client.post(
-                    endpoint,
-                    content=json.dumps(payload).encode("utf-8"),
-                    headers=headers,
+            async with self._client_factory(timeout_s) as client:
+                resp = await asyncio.wait_for(
+                    client.post(
+                        endpoint,
+                        content=json.dumps(payload).encode("utf-8"),
+                        headers=headers,
+                    ),
+                    timeout=timeout_s,
                 )
-        except httpx.HTTPError as exc:
+        except (TimeoutError, httpx.HTTPError) as exc:
             logger.warning(
                 "Bitrix transport error",
                 extra={
@@ -135,8 +150,6 @@ class BitrixNotificationProvider:
             if isinstance(data, dict) and data.get("error")
             else None
         )
-
-        # loga SEMPRE o retorno do Bitrix (status + corpo)
         log_extra = {
             "status": resp.status_code,
             "endpoint": _redact(endpoint),
@@ -145,7 +158,6 @@ class BitrixNotificationProvider:
             "duration_ms": took_ms,
             "response": body[:1000],
         }
-
         if not resp.is_success or api_error:
             detail = api_error or body[:500] or f"HTTP {resp.status_code}"
             logger.warning("Bitrix response (falha)", extra=log_extra)
@@ -169,13 +181,11 @@ def _endpoint(url: str, path: str, default_method: str) -> str:
 
 
 def _redact(endpoint: str) -> str:
-    """Esconde o segmento de webhook (`/rest/<id>/<code>/`) nos logs."""
     parts = endpoint.split("/rest/", 1)
     return parts[0] + "/rest/***" if len(parts) == 2 else endpoint
 
 
 def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Copia o payload mascarando o `botToken` para o log da requisição."""
     out = dict(payload)
     if "botToken" in out:
         out["botToken"] = "***"
@@ -186,8 +196,9 @@ def _message_text(m: NotificationMessage) -> str:
     lines = [
         f"[B]{m.title}[/B]",
         "",
-        f"Pipeline: {m.pipeline_name}",
+        f"Workflow: {m.pipeline_name}",
         f"Job: {m.job_name}",
+        f"Execution: #{m.execution_id}",
     ]
     if m.error_message:
         lines += ["", "💥 Erro:", m.error_message]

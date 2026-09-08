@@ -1,4 +1,4 @@
-"""Loop do worker que despacha notificações pendentes da fila Redis."""
+"""Loop do worker que despacha `NotificationDelivery` pendentes da fila Redis."""
 
 from __future__ import annotations
 
@@ -34,11 +34,11 @@ async def run_notification_loop(stop: asyncio.Event, redis: Redis) -> None:
             continue
 
         try:
-            await service.dispatch(uuid.UUID(message.notification_id))
+            await service.dispatch(uuid.UUID(message.notification_id), stop=stop)
         except Exception:
             logger.exception(
                 "erro ao despachar notificação",
-                extra={"notification_id": message.notification_id},
+                extra={"delivery_id": message.notification_id},
             )
         finally:
             await queue.ack(message)

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { useAuthContext } from "@/components/AuthProvider";
-import { NotificationSettingsCard } from "@/components/notifications/NotificationSettingsCard";
 import { fetchReadiness, type Readiness } from "@/lib/api";
 import { useEditorConfig } from "@/lib/editorConfig";
 import { Card, PageHeader, Switch } from "@/ui";
@@ -116,7 +116,18 @@ export function Settings() {
         )}
       </Card>
 
-      {user?.role === "admin" && <NotificationSettingsCard />}
+      <Card className="mt-4">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-faint">
+          Notificações
+        </h2>
+        <p className="text-sm text-fg-muted">
+          Os provedores de notificação (Email, Bitrix) são gerenciados na{" "}
+          <Link to="/notifications" className="text-primary hover:underline">
+            Central de Notificações
+          </Link>
+          .
+        </p>
+      </Card>
     </div>
   );
 }

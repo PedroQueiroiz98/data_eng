@@ -7,9 +7,8 @@ from nbplatform.models.execution import Execution, ExecutionLog
 from nbplatform.models.job import Job, JobLog, JobTask
 from nbplatform.models.notebook import Notebook, NotebookVersion
 from nbplatform.models.notification import (
-    Notification,
-    NotificationConfig,
-    NotificationSettings,
+    NotificationDelivery,
+    NotificationProvider,
 )
 from nbplatform.models.schedule import Schedule
 from nbplatform.models.user import User
@@ -35,9 +34,8 @@ __all__ = [
     "JobTask",
     "Notebook",
     "NotebookVersion",
-    "Notification",
-    "NotificationConfig",
-    "NotificationSettings",
+    "NotificationDelivery",
+    "NotificationProvider",
     "Schedule",
     "User",
     "Workflow",

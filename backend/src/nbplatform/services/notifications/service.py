@@ -1,15 +1,16 @@
-"""NotificationService: resolve canais, monta mensagem, despacha, registra histórico.
+"""NotificationService: resolve providers globais, monta mensagem, despacha, audita.
 
-Regras (spec §10, §11, §12, §13, §16, §17):
-- ausência de configuração nunca falha o Job;
+Regras (spec §5, §6, §7, §16, §17, §18, §19):
+- ausência de provider ativo nunca falha o Job (apenas log INFO);
 - falha de um provider não impede os outros;
-- retry com backoff exponencial e limite;
-- idempotência por (job_id, event_type, channel);
+- retry com backoff exponencial e limite, independente do retry do Job;
+- idempotência por (scope_id, provider_id, event_type);
 - secrets nunca são logados nem retornados.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -23,140 +24,185 @@ from nbplatform.core.config import get_settings
 from nbplatform.core.crypto import SecretCipher
 from nbplatform.db.session import session_scope
 from nbplatform.domain.notifications import (
-    NotificationChannel,
     NotificationEvent,
+    NotificationEventType,
     NotificationMessage,
     NotificationStatus,
+    idempotency_key,
 )
-from nbplatform.models.job import Job
-from nbplatform.models.notification import NotificationConfig
+from nbplatform.models.job import Job, JobTask
 from nbplatform.queue.notification_queue import NotificationQueue
 from nbplatform.repositories.notification_repository import NotificationRepository
-from nbplatform.services.notifications.email_sender import EmailSender, SmtpEmailSender
-from nbplatform.services.notifications.message_builder import build_job_message
-from nbplatform.services.notifications.providers import (
-    BitrixNotificationProvider,
-    EmailNotificationProvider,
-    NotificationProvider,
+from nbplatform.services.notifications.interface import INotificationService
+from nbplatform.services.notifications.message_builder import (
+    build_job_message,
+    build_workflow_message,
 )
-from nbplatform.services.notifications.resolved_settings import ResolvedSettings, resolve
+from nbplatform.services.notifications.providers import ResolvedTarget
+from nbplatform.services.notifications.registry import (
+    NotificationProviderRegistry,
+    UnknownProviderType,
+    default_registry,
+)
 
 logger = logging.getLogger(__name__)
 
-_EVENT_FLAG = {
-    NotificationEvent.JOB_FAILED: "on_failure",
-    NotificationEvent.JOB_SUCCESS: "on_success",
-    NotificationEvent.JOB_RETRY: "on_retry",
-    NotificationEvent.JOB_CANCELLED: "on_cancelled",
-    NotificationEvent.JOB_STARTED: "on_started",
-}
 
-
-class NotificationService:
-    def __init__(self, redis: Redis, *, email_sender: EmailSender | None = None) -> None:
+class NotificationService(INotificationService):
+    def __init__(
+        self,
+        redis: Redis,
+        *,
+        registry: NotificationProviderRegistry | None = None,
+    ) -> None:
         self.redis = redis
         self.settings = get_settings()
         self.queue = NotificationQueue(redis)
         self._cipher = SecretCipher(self.settings.secret_encryption_key)
-        self._providers: dict[str, NotificationProvider] = {
-            NotificationChannel.EMAIL.value: EmailNotificationProvider(
-                email_sender or SmtpEmailSender()
-            ),
-            NotificationChannel.BITRIX.value: BitrixNotificationProvider(),
-        }
+        self._registry = registry or default_registry()
 
-    # ── produção (chamado pelo JobOrchestrator) ───────────────────────────
-    async def enqueue_job_event(
-        self, job_id: uuid.UUID, event: NotificationEvent
-    ) -> list[uuid.UUID]:
-        """Cria as linhas de histórico (idempotente) e enfileira. Nunca levanta."""
+    # ── produção (chamado pelo JobOrchestrator) ──────────────────────────
+    async def notify(self, event: NotificationEvent) -> list[uuid.UUID]:
         try:
-            return await self._enqueue_job_event(job_id, event)
+            return await self._notify(event)
         except Exception:  # noqa: BLE001 - notificação nunca derruba o Job
             logger.exception(
-                "falha ao enfileirar notificações", extra={"job_id": str(job_id)}
+                "Notification processing failed",
+                extra={
+                    "event_type": str(event.event_type),
+                    "job_id": str(event.job_id),
+                },
             )
             return []
 
-    async def _enqueue_job_event(
-        self, job_id: uuid.UUID, event: NotificationEvent
-    ) -> list[uuid.UUID]:
+    async def _notify(self, event: NotificationEvent) -> list[uuid.UUID]:
+        logger.info(
+            "Notification processing started",
+            extra={
+                "event_type": str(event.event_type),
+                "job_id": str(event.job_id),
+                "execution_id": str(event.execution_id),
+            },
+        )
         created: list[uuid.UUID] = []
         async with session_scope() as session:
-            job = await session.get(Job, job_id)
-            if job is None:
-                return []
             repo = NotificationRepository(session)
-            cfg = await self._effective_config(repo, job.workflow_id, event)
-            channels = _enabled_channels(cfg, event)
-            if not cfg or not channels:
+            providers = await repo.enabled_providers()
+            if not providers:
                 logger.info(
-                    "Job FAILED / Notification: No notification channels configured",
-                    extra={"job_id": str(job_id), "event": str(event)},
+                    "No active notification provider configured",
+                    extra={
+                        "event_type": str(event.event_type),
+                        "job_id": str(event.job_id),
+                        "execution_id": str(event.execution_id),
+                    },
                 )
                 return []
+            logger.info(
+                "Notification providers found",
+                extra={"count": len(providers), "event_type": str(event.event_type)},
+            )
 
-            message = await build_job_message(session, job, event)
+            message = await self._build_message(session, event)
+            if message is None:
+                return []
             payload = _serialize(message)
+            scope_id = event.scope_id
 
-            for channel in channels:
-                provider = self._providers[channel.value]
-                targets = provider.targets(cfg)
+            for provider in providers:
+                if not self._registry.has(provider.provider_type):
+                    logger.warning(
+                        "Notification provider type has no sender",
+                        extra={"provider_type": provider.provider_type},
+                    )
+                    continue
+                sender = self._registry.get(provider.provider_type)
+                try:
+                    targets = sender.targets(
+                        ResolvedTarget(provider.id, provider.configuration_json or {}, "")
+                    )
+                except Exception:  # noqa: BLE001
+                    targets = []
+                dedupe = idempotency_key(scope_id, str(provider.id), event.event_type)
                 seq = await self.queue.next_seq()
-                nid = await repo.create_if_absent(
-                    job_id=job_id,
-                    workflow_id=job.workflow_id,
-                    execution_id=_maybe_uuid(message.execution_id),
-                    channel=channel,
-                    event_type=event,
+                delivery_id = await repo.create_if_absent(
+                    notification_provider_id=provider.id,
+                    provider_type=provider.provider_type,
+                    event_type=event.event_type,
+                    workflow_id=event.workflow_id,
+                    job_id=event.job_id,
+                    execution_id=event.execution_id,
+                    dedupe_key=dedupe,
                     recipient=", ".join(targets) if targets else None,
                     max_attempts=self.settings.notification_max_attempts,
                     payload=payload,
                     seq=seq,
                 )
-                if nid is not None:
-                    created.append(nid)
-                    logger.info(
-                        "Notification created",
-                        extra={
-                            "job_id": str(job_id),
-                            "channel": channel.value,
-                            "event": str(event),
-                        },
-                    )
+                if delivery_id is not None:
+                    created.append(delivery_id)
 
-        for nid in created:
-            await self.queue.enqueue(str(nid))
+        for did in created:
+            await self.queue.enqueue(str(did))
         return created
 
-    # ── consumo (chamado pelo worker) ────────────────────────────────────
-    async def dispatch(self, notification_id: uuid.UUID) -> NotificationStatus:
+    async def _build_message(
+        self, session: Any, event: NotificationEvent
+    ) -> NotificationMessage | None:
+        if event.job_id is None:
+            return None
+        job = await session.get(Job, event.job_id)
+        if job is None:
+            return None
+        if event.event_type is NotificationEventType.JOB_FAILED:
+            task = (
+                await session.get(JobTask, event.job_task_id)
+                if event.job_task_id
+                else None
+            )
+            if task is None:
+                return None
+            return await build_job_message(session, job, task)
+        return await build_workflow_message(session, job)
+
+    # ── consumo (chamado pelo worker) ───────────────────────────────────
+    async def dispatch(
+        self, delivery_id: uuid.UUID, *, stop: asyncio.Event | None = None
+    ) -> NotificationStatus:
         try:
-            return await self._dispatch(notification_id)
+            return await self._dispatch(delivery_id, stop)
         except Exception:  # noqa: BLE001
             logger.exception(
-                "falha inesperada ao despachar notificação",
-                extra={"notification_id": str(notification_id)},
+                "Notification dispatch failed unexpectedly",
+                extra={"delivery_id": str(delivery_id)},
             )
             return NotificationStatus.FAILED
 
-    async def _dispatch(self, notification_id: uuid.UUID) -> NotificationStatus:
+    async def _dispatch(
+        self, delivery_id: uuid.UUID, stop: asyncio.Event | None
+    ) -> NotificationStatus:
         async with session_scope() as session:
             repo = NotificationRepository(session)
-            row = await repo.get(notification_id)
+            row = await repo.get_delivery(delivery_id)
             if row is None:
                 return NotificationStatus.FAILED
             if row.status == NotificationStatus.SENT:
                 return NotificationStatus.SENT  # idempotência: já enviado
 
-            cfg = (
-                await self._effective_config(repo, row.workflow_id, row.event_type)
-                if row.workflow_id
+            provider = (
+                await repo.get_provider(row.notification_provider_id)
+                if row.notification_provider_id
                 else None
             )
-            resolved = resolve(
-                await repo.get_settings_row(), self.settings, self._cipher
-            )
+            if provider is None or not provider.enabled:
+                row.status = NotificationStatus.FAILED
+                row.sending_since = None
+                row.error_message = "provedor removido ou desativado"
+                logger.warning(
+                    "Notification skipped: provider gone/disabled",
+                    extra={"delivery_id": str(delivery_id)},
+                )
+                return NotificationStatus.FAILED
+
             row.status = NotificationStatus.SENDING
             row.sending_since = datetime.now(UTC)
             row.attempt += 1
@@ -164,38 +210,97 @@ class NotificationService:
 
             attempt = row.attempt
             max_attempts = row.max_attempts
-            channel = row.channel
+            provider_type = provider.provider_type
+            config = dict(provider.configuration_json or {})
+            secret_ct = provider.secret_ct
             message = _deserialize(row.payload)
+            provider_id = provider.id
+
+        if stop is not None and stop.is_set():
+            await self.queue.enqueue(str(delivery_id))
+            return NotificationStatus.PENDING
+
+        secret = ""
+        if secret_ct:
+            try:
+                secret = self._cipher.decrypt(secret_ct)
+            except ValueError:
+                secret = ""
+
+        try:
+            sender = self._registry.get(provider_type)
+        except UnknownProviderType:
+            return await self._finish_failure(
+                delivery_id, provider_type, attempt, max_attempts,
+                f"tipo '{provider_type}' sem implementação",
+            )
 
         logger.info(
-            "Notification started",
-            extra={"notification_id": str(notification_id), "channel": channel.value},
+            "Notification sending",
+            extra={
+                "delivery_id": str(delivery_id),
+                "provider_type": provider_type,
+                "attempt": attempt,
+            },
         )
         started = time.perf_counter()
-        result = await self._send(channel, message, cfg, resolved)
+        try:
+            result = await asyncio.wait_for(
+                sender.send(
+                    message,
+                    ResolvedTarget(provider_id, config, secret),
+                    timeout_s=self.settings.notification_send_timeout_s,
+                ),
+                timeout=self.settings.notification_send_timeout_s + 5,
+            )
+        except (TimeoutError, asyncio.CancelledError):
+            result = None
         took_ms = round((time.perf_counter() - started) * 1000)
 
-        async with session_scope() as session:
-            repo = NotificationRepository(session)
-            row = await repo.get(notification_id)
-            if row is None:
-                return NotificationStatus.FAILED
-            if result.ok:
+        if result is not None and result.ok:
+            async with session_scope() as session:
+                row = await NotificationRepository(session).get_delivery(delivery_id)
+                if row is None:
+                    return NotificationStatus.FAILED
                 row.status = NotificationStatus.SENT
                 row.sent_at = datetime.now(UTC)
                 row.sending_since = None
                 row.error_message = None
-                logger.info(
-                    "Notification sent",
-                    extra={
-                        "notification_id": str(notification_id),
-                        "channel": channel.value,
-                        "duration_ms": took_ms,
-                    },
-                )
-                return NotificationStatus.SENT
+            logger.info(
+                "Notification sent",
+                extra={
+                    "delivery_id": str(delivery_id),
+                    "provider_type": provider_type,
+                    "attempt": attempt,
+                    "status": "SENT",
+                    "duration_ms": took_ms,
+                },
+            )
+            return NotificationStatus.SENT
 
-            row.error_message = (result.error or "erro desconhecido")[:2000]
+        error = (
+            (result.error if result is not None else None)
+            or f"timeout após {self.settings.notification_send_timeout_s:.0f}s"
+        )
+        return await self._finish_failure(
+            delivery_id, provider_type, attempt, max_attempts, error, took_ms
+        )
+
+    async def _finish_failure(
+        self,
+        delivery_id: uuid.UUID,
+        provider_type: str,
+        attempt: int,
+        max_attempts: int,
+        error: str,
+        took_ms: int | None = None,
+    ) -> NotificationStatus:
+        async with session_scope() as session:
+            row = await NotificationRepository(session).get_delivery(delivery_id)
+            if row is None:
+                return NotificationStatus.FAILED
+            row.error_message = error[:2000]
+            row.sending_since = None
             if attempt < max_attempts:
                 delay = min(
                     self.settings.notification_retry_initial_delay_s
@@ -203,40 +308,40 @@ class NotificationService:
                     self.settings.notification_retry_max_delay_s,
                 )
                 row.status = NotificationStatus.PENDING
-                row.sending_since = None
                 row.next_retry_at = datetime.fromtimestamp(time.time() + delay, tz=UTC)
                 logger.warning(
-                    "Notification failed",
+                    "Notification sending failed",
                     extra={
-                        "notification_id": str(notification_id),
-                        "channel": channel.value,
+                        "delivery_id": str(delivery_id),
+                        "provider_type": provider_type,
                         "attempt": attempt,
                         "error": row.error_message,
                         "retry_in_s": round(delay, 1),
+                        "duration_ms": took_ms,
                     },
                 )
                 await self.queue.enqueue_delayed(
-                    str(notification_id), ready_at=time.time() + delay
+                    str(delivery_id), ready_at=time.time() + delay
                 )
                 return NotificationStatus.PENDING
 
             row.status = NotificationStatus.FAILED
-            row.sending_since = None
             logger.error(
-                "Notification failed (giving up)",
+                "Notification sending failed (giving up)",
                 extra={
-                    "notification_id": str(notification_id),
-                    "channel": channel.value,
+                    "delivery_id": str(delivery_id),
+                    "provider_type": provider_type,
                     "attempt": attempt,
                     "error": row.error_message,
+                    "status": "FAILED",
                 },
             )
             return NotificationStatus.FAILED
 
-    async def retry(self, notification_id: uuid.UUID) -> None:
-        """Reenfileira uma notificação FAILED para nova tentativa manual."""
+    async def retry(self, delivery_id: uuid.UUID) -> None:
+        """Reenfileira uma delivery não-SENT para nova tentativa manual."""
         async with session_scope() as session:
-            row = await NotificationRepository(session).get(notification_id)
+            row = await NotificationRepository(session).get_delivery(delivery_id)
             if row is None or row.status == NotificationStatus.SENT:
                 return
             row.status = NotificationStatus.PENDING
@@ -244,81 +349,7 @@ class NotificationService:
             row.sending_since = None
             if row.attempt >= row.max_attempts:
                 row.max_attempts = row.attempt + 1
-        await self.queue.enqueue(str(notification_id))
-
-    async def _effective_config(
-        self,
-        repo: NotificationRepository,
-        workflow_id: uuid.UUID,
-        event: NotificationEvent,
-    ) -> NotificationConfig | None:
-        """Config do pipeline; se não houver, cai no fallback global (só JOB_FAILED)."""
-        cfg = await repo.get_config(workflow_id)
-        if cfg is not None and _enabled_channels(cfg, event):
-            return cfg
-        if event is not NotificationEvent.JOB_FAILED:
-            return cfg
-
-        row = await repo.get_settings_row()
-        enabled = (
-            row.default_on_failure if row else False
-        ) or self.settings.notify_default_on_failure
-        if not enabled:
-            return cfg
-
-        recipients = (
-            list(row.default_email_recipients)
-            if row and row.default_email_recipients
-            else _split(self.settings.notify_default_email_recipients)
-        )
-        dialog = (
-            (row.default_bitrix_dialog_id if row else "")
-            or self.settings.notify_default_bitrix_dialog_id
-        ).strip() or None
-        if not recipients and not dialog:
-            return cfg
-
-        synthetic = NotificationConfig(workflow_id=workflow_id)
-        synthetic.on_failure = True
-        synthetic.email_enabled = bool(recipients)
-        synthetic.email_recipients = recipients
-        synthetic.email_cc = []
-        synthetic.email_bcc = []
-        synthetic.email_subject = None
-        synthetic.bitrix_enabled = bool(dialog)
-        synthetic.bitrix_dialog_id = dialog
-        return synthetic
-
-    async def _send(
-        self,
-        channel: NotificationChannel,
-        message: NotificationMessage,
-        cfg: NotificationConfig | None,
-        resolved: ResolvedSettings,
-    ) -> Any:
-        provider = self._providers[channel.value]
-        if cfg is None:
-            from nbplatform.domain.notifications import ProviderResult
-
-            return ProviderResult.failure("configuração do pipeline removida")
-        return await provider.send(message, cfg, resolved)
-
-
-def _split(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
-def _enabled_channels(
-    cfg: NotificationConfig | None, event: NotificationEvent
-) -> list[NotificationChannel]:
-    if cfg is None or not getattr(cfg, _EVENT_FLAG[event], False):
-        return []
-    out: list[NotificationChannel] = []
-    if cfg.email_enabled:
-        out.append(NotificationChannel.EMAIL)
-    if cfg.bitrix_enabled:
-        out.append(NotificationChannel.BITRIX)
-    return out
+        await self.queue.enqueue(str(delivery_id))
 
 
 def _serialize(m: NotificationMessage) -> dict[str, Any]:
@@ -330,17 +361,8 @@ def _serialize(m: NotificationMessage) -> dict[str, Any]:
 
 def _deserialize(payload: dict[str, Any]) -> NotificationMessage:
     data = dict(payload)
-    data["event_type"] = NotificationEvent(data["event_type"])
+    data["event_type"] = NotificationEventType(data["event_type"])
     ts = data.get("timestamp")
     data["timestamp"] = datetime.fromisoformat(ts) if ts else datetime.now(UTC)
     known = set(NotificationMessage.__dataclass_fields__)
     return NotificationMessage(**{k: v for k, v in data.items() if k in known})
-
-
-def _maybe_uuid(value: str | None) -> uuid.UUID | None:
-    if not value:
-        return None
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        return None
