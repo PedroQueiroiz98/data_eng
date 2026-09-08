@@ -15,8 +15,10 @@ from nbplatform.api.routes import (
     audit,
     auth,
     executions,
+    git,
     health,
     jobs,
+    kernels,
     lsp,
     metrics,
     notebooks,
@@ -110,6 +112,8 @@ def create_app() -> FastAPI:
         lsp,
         notifications,
         workspaces,
+        kernels,
+        git,
     ):
         app.include_router(module.router, dependencies=protected)
 

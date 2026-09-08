@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
-from fastapi import APIRouter, File, Query, UploadFile, status
+from fastapi import APIRouter, File, Header, Query, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
 from nbplatform.api.deps import (
@@ -34,6 +34,7 @@ from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.schemas.execution import ExecutionRead
 from nbplatform.schemas.workspace import (
     CopyRequest,
+    DataPreviewRead,
     FileContentRead,
     FileNode,
     RenameRequest,
@@ -224,14 +225,50 @@ async def write_file(
     session: SessionDep,
     access: WorkspaceEditor,
     path: str = Query(min_length=1),
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> FileContentRead:
     svc = WorkspaceService(session)
     await svc.get_active(workspace_id)
     content = await _fs(svc, workspace_id).write_file(
-        path, text=payload.text, notebook=payload.notebook
+        path, text=payload.text, notebook=payload.notebook, if_match=if_match
     )
     await _audit(session, access.user.id, "WORKSPACE_FS_WRITE", workspace_id, path=path)
     return FileContentRead.model_validate(content, from_attributes=True)
+
+
+@router.get("/{workspace_id}/data", response_model=DataPreviewRead)
+async def read_data(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _access: WorkspaceViewer,
+    path: str = Query(min_length=1),
+    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1),
+) -> DataPreviewRead:
+    svc = WorkspaceService(session)
+    await svc.get(workspace_id)
+    settings = get_settings()
+    capped = min(limit or 100, settings.workspace_data_max_rows)
+    preview = await _fs(svc, workspace_id).read_data(path, offset=offset, limit=capped)
+    return DataPreviewRead.model_validate(preview, from_attributes=True)
+
+
+@router.get("/{workspace_id}/export")
+async def export_notebook(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _access: WorkspaceViewer,
+    path: str = Query(min_length=1),
+    fmt: str = Query(default="ipynb", pattern="^(ipynb|py)$"),
+) -> Response:
+    svc = WorkspaceService(session)
+    await svc.get(workspace_id)
+    data, filename, media_type = await _fs(svc, workspace_id).export_notebook(path, fmt)
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(

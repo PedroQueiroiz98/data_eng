@@ -76,6 +76,16 @@ class FileContentRead(BaseModel):
     path: str
     kind: Literal["notebook", "text", "binary"]
     content: dict[str, Any] | str | None = None
+    etag: str | None = None
+
+
+class DataPreviewRead(BaseModel):
+    columns: list[str]
+    dtypes: list[str]
+    rows: list[list[Any]]
+    total: int | None = None
+    truncated: bool = False
+    offset: int = 0
 
 
 class WriteFileRequest(BaseModel):

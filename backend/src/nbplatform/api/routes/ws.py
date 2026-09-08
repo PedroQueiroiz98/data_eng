@@ -1,22 +1,31 @@
-"""WebSocket de acompanhamento: snapshot + eventos em tempo real (execução e job)."""
+"""WebSocket de acompanhamento: snapshot + eventos em tempo real (execução, job, kernel)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import uuid
 from collections.abc import Mapping
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from nbplatform.core.config import get_settings
 from nbplatform.core.errors import NotFoundError
 from nbplatform.db.session import session_scope
+from nbplatform.domain.enums import WORKSPACE_ROLE_RANK, WorkspaceRole
 from nbplatform.queue.redis_client import get_redis
+from nbplatform.repositories.workspace_repository import WorkspaceRepository
 from nbplatform.schemas.execution import ExecutionDetail, ExecutionLogRead
 from nbplatform.schemas.job import JobLogRead
 from nbplatform.services.execution_service import ExecutionService
 from nbplatform.services.job_service import JobService
-from nbplatform.ws.events import subscribe_execution_events, subscribe_job_events
+from nbplatform.ws.events import (
+    subscribe_execution_events,
+    subscribe_job_events,
+    subscribe_kernel_events,
+)
 
 router = APIRouter()
 
@@ -24,20 +33,23 @@ _TERMINAL_EXEC = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
 _TERMINAL_JOB = {"SUCCESS", "FAILED", "CANCELLED"}
 
 
-def _authenticated(websocket: WebSocket) -> bool:
-    """Auth de WebSocket via ?token=<jwt> (Bearer não é prático no handshake)."""
+def _claims(websocket: WebSocket) -> dict[str, Any] | None:
+    """Decodifica o JWT de ?token= (Bearer não é prático no handshake)."""
     import jwt
 
     from nbplatform.core.security import decode_access_token
 
     token = websocket.query_params.get("token")
     if not token:
-        return False
+        return None
     try:
-        decode_access_token(token)
+        return decode_access_token(token)
     except jwt.PyJWTError:
-        return False
-    return True
+        return None
+
+
+def _authenticated(websocket: WebSocket) -> bool:
+    return _claims(websocket) is not None
 
 
 @router.websocket("/ws/executions/{execution_id}")
@@ -118,6 +130,77 @@ async def job_ws(websocket: WebSocket, job_id: str) -> None:
         subscribe_job_events(get_redis(), job_id),
         terminal=_TERMINAL_JOB,
     )
+
+
+@router.websocket("/ws/kernels/{session_id}")
+async def kernel_ws(websocket: WebSocket, session_id: str) -> None:
+    await websocket.accept()
+    claims = _claims(websocket)
+    if claims is None:
+        await websocket.close(code=1008)
+        return
+
+    settings = get_settings()
+    redis = get_redis()
+    meta = await redis.hgetall(settings.kernel_sess_key(session_id))
+    user_id = str(claims.get("sub", ""))
+    if not meta or meta.get("user_id") != user_id:
+        await websocket.close(code=1008)
+        return
+
+    # ACL do Workspace: precisa ser EDITOR+ (admin global tem bypass).
+    allowed = claims.get("role") == "admin"
+    if not allowed:
+        with contextlib.suppress(Exception):
+            async with session_scope() as session:
+                member = await WorkspaceRepository(session).get_member(
+                    uuid.UUID(str(meta["workspace_id"])), uuid.UUID(user_id)
+                )
+            allowed = member is not None and (
+                WORKSPACE_ROLE_RANK[member.role]
+                >= WORKSPACE_ROLE_RANK[WorkspaceRole.EDITOR]
+            )
+    if not allowed:
+        await websocket.close(code=1008)
+        return
+
+    after_seq = int(websocket.query_params.get("after_seq", "0") or 0)
+    raw_events = await redis.lrange(settings.kernel_log_key(session_id), 0, -1)
+    events: list[dict[str, Any]] = []
+    for raw in raw_events:
+        try:
+            evt = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if int(evt.get("seq", 0)) > after_seq:
+            events.append(evt)
+    snapshot = {
+        "type": "snapshot",
+        "session": {
+            "session_id": session_id,
+            "status": meta.get("status", "starting"),
+            "execution_count": int(meta.get("execution_count") or 0),
+            "notebook_path": meta.get("notebook_path", ""),
+        },
+        "events": events,
+    }
+
+    await websocket.send_json(snapshot)
+    async with subscribe_kernel_events(redis, session_id) as stream:
+        client_gone = asyncio.create_task(_wait_client_close(websocket))
+        try:
+            async for event in stream:
+                if client_gone.done():
+                    break
+                await websocket.send_json(event)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            client_gone.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await client_gone
+    with contextlib.suppress(RuntimeError):
+        await websocket.close()
 
 
 async def _stream(  # type: ignore[no-untyped-def]

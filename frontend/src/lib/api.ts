@@ -36,9 +36,10 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   const url = resolveUrl(path);
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const headers: Record<string, string> = { Accept: "application/json", ...extraHeaders };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
   const init: RequestInit = { method, headers };
   if (body !== undefined) {
@@ -69,8 +70,11 @@ async function request<T>(
 export const apiGet = <T>(path: string): Promise<T> => request<T>("GET", path);
 export const apiPost = <T>(path: string, body?: unknown): Promise<T> =>
   request<T>("POST", path, body);
-export const apiPut = <T>(path: string, body?: unknown): Promise<T> =>
-  request<T>("PUT", path, body);
+export const apiPut = <T>(
+  path: string,
+  body?: unknown,
+  headers?: Record<string, string>,
+): Promise<T> => request<T>("PUT", path, body, headers);
 export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
   request<T>("PATCH", path, body);
 export const apiDelete = (path: string): Promise<void> => request<void>("DELETE", path);

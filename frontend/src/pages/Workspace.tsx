@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
+  useCopyEntry,
   useDeleteEntry,
   useMakeDir,
   useRenameEntry,
@@ -8,45 +9,134 @@ import {
   useWorkspaceTree,
   useWriteFile,
 } from "@/hooks/useWorkspace";
-import { downloadUrl, uploadFile, type FileNode } from "@/lib/workspace";
-import { useWorkspaceStore } from "@/store/workspace";
-import { FilePreview } from "@/components/workspace/FilePreview";
+import { useResizable } from "@/hooks/useResizable";
+import {
+  downloadUrl,
+  executeWorkspaceNotebook,
+  uploadFile,
+  type FileNode,
+} from "@/lib/workspace";
+import {
+  baseName,
+  dirName,
+  duplicateName,
+  joinPath,
+  kindFromPath,
+  logicalAbsPath,
+} from "@/lib/workspaceFiles";
+import { selectView, useWorkspaceStore } from "@/store/workspace";
+import { useWorkspaceRuntime } from "@/store/workspaceRuntime";
+import { useHotkeys } from "@/hooks/useHotkeys";
+import { Palette, type PaletteItem } from "@/components/Palette";
+import {
+  CreateNotebookDialog,
+  type NotebookLanguage,
+} from "@/components/workspace/CreateNotebookDialog";
+import { EditorSurface } from "@/components/workspace/EditorSurface";
+import { EditorTabs } from "@/components/workspace/EditorTabs";
+import { ExecutionPanel } from "@/components/workspace/ExecutionPanel";
 import { FileTree } from "@/components/workspace/FileTree";
 import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { Button, Dialog, EmptyState, TextField, useConfirm, useToast } from "@/ui";
-import { SpinnerIcon, WorkspaceIcon } from "@/ui/icons";
+import {
+  CollapseIcon,
+  ExpandIcon,
+  FilePlusIcon,
+  FolderPlusIcon,
+  NotebookIcon,
+  RefreshIcon,
+  SearchIcon,
+  SpinnerIcon,
+  UploadIcon,
+  WorkspaceIcon,
+} from "@/ui/icons";
 
 interface PromptState {
   title: string;
   label: string;
   initial: string;
   confirmLabel: string;
+  hint?: string;
   onSubmit: (value: string) => void;
 }
+
+function notebookSkeleton(language: NotebookLanguage): Record<string, unknown> {
+  const params = {
+    cell_type: "code",
+    metadata: { tags: ["parameters"] },
+    source: "# Parameters\n",
+    outputs: [],
+    execution_count: null,
+  };
+  const body =
+    language === "sql"
+      ? {
+          cell_type: "code",
+          metadata: {},
+          source: "%%sql\nSELECT 1\n",
+          outputs: [],
+          execution_count: null,
+        }
+      : { cell_type: "code", metadata: {}, source: "", outputs: [], execution_count: null };
+  return {
+    nbformat: 4,
+    nbformat_minor: 5,
+    metadata: {
+      kernelspec: { name: "python3", display_name: "Python 3" },
+      language_info: { name: "python" },
+    },
+    cells: [params, body],
+  };
+}
+
+function flattenFiles(node: FileNode, acc: FileNode[] = []): FileNode[] {
+  for (const c of node.children ?? []) {
+    if (c.type === "file") acc.push(c);
+    else flattenFiles(c, acc);
+  }
+  return acc;
+}
+
+const emitCommand = (cmd: string): void => {
+  window.dispatchEvent(new CustomEvent("nbp:workspace-command", { detail: cmd }));
+};
 
 export function Workspace() {
   const { id = "" } = useParams();
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
 
   const ws = useWorkspace(id);
   const tree = useWorkspaceTree(id);
 
+  const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
+  const view = useWorkspaceStore(selectView);
+  const dirtyByPath = useWorkspaceStore((s) => s.dirtyByPath);
   const {
-    openPath,
-    expandedDirs,
-    dirtyByPath,
-    setActiveWorkspace,
-    openFile,
+    openTab,
+    closeTab,
+    closeOthers,
+    closeToRight,
+    closeAll,
+    reopenClosed,
+    reorderTabs,
+    setActiveTab,
+    renameTabPath,
     toggleDir,
     setExpanded,
+    collapseAllDirs,
     markDirty,
+    setExplorerWidth,
+    toggleExplorer,
   } = useWorkspaceStore();
 
   useEffect(() => {
     setActiveWorkspace(id);
   }, [id, setActiveWorkspace]);
 
+  const expandedSet = useMemo(() => new Set(view.expandedDirs), [view.expandedDirs]);
+  const openPaths = useMemo(() => view.tabs.map((t) => t.path), [view.tabs]);
   const dirtyCount = useMemo(
     () => Object.values(dirtyByPath).filter(Boolean).length,
     [dirtyByPath],
@@ -55,19 +145,53 @@ export function Workspace() {
   const writeFile = useWriteFile(id);
   const makeDir = useMakeDir(id);
   const rename = useRenameEntry(id);
+  const copy = useCopyEntry(id);
   const del = useDeleteEntry(id);
 
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptValue, setPromptValue] = useState("");
+  const [search, setSearch] = useState("");
+  const [nbDialog, setNbDialog] = useState<{ dir: string } | null>(null);
+  const [palette, setPalette] = useState<"files" | "commands" | null>(null);
   const uploadTarget = useRef<string>("");
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const togglePanel = useWorkspaceStore((s) => s.togglePanel);
+  const setPanelTab = useWorkspaceStore((s) => s.setPanelTab);
+  const kernelStatus = useWorkspaceRuntime((s) => s.kernelStatus);
+
+  const explorerResize = useResizable({
+    axis: "x",
+    value: view.explorerWidth,
+    min: 160,
+    max: 560,
+    onChange: setExplorerWidth,
+  });
 
   const openPrompt = (p: PromptState) => {
     setPrompt(p);
     setPromptValue(p.initial);
   };
 
-  const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+  const onDirtyChange = useCallback(
+    (path: string, dirty: boolean) => markDirty(path, dirty),
+    [markDirty],
+  );
+
+  // ── criação ────────────────────────────────────────────────────────────────
+  const createNotebook = (path: string, language: NotebookLanguage) => {
+    writeFile.mutate(
+      { path, notebook: notebookSkeleton(language) },
+      {
+        onSuccess: () => {
+          setExpanded(dirName(path), true);
+          openTab(path, "notebook");
+          void tree.refetch();
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
 
   const onNewFile = (dir: string) =>
     openPrompt({
@@ -76,35 +200,17 @@ export function Workspace() {
       initial: "",
       confirmLabel: "Criar",
       onSubmit: (name) => {
-        const path = join(dir, name);
-        const isNb = name.toLowerCase().endsWith(".ipynb");
+        const path = joinPath(dir, name);
+        const isNb = kindFromPath(path) === "notebook";
         writeFile.mutate(
           isNb
-            ? {
-                path,
-                notebook: {
-                  nbformat: 4,
-                  nbformat_minor: 5,
-                  metadata: {
-                    kernelspec: { name: "python3", display_name: "Python 3" },
-                    language_info: { name: "python" },
-                  },
-                  cells: [
-                    {
-                      cell_type: "code",
-                      metadata: { tags: ["parameters"] },
-                      source: "# Parameters\n",
-                      outputs: [],
-                      execution_count: null,
-                    },
-                  ],
-                },
-              }
+            ? { path, notebook: notebookSkeleton("python") }
             : { path, text: "" },
           {
             onSuccess: () => {
               setExpanded(dir, true);
-              openFile(path);
+              openTab(path);
+              void tree.refetch();
             },
             onError: (e) => toast.error((e as Error).message),
           },
@@ -119,16 +225,15 @@ export function Workspace() {
       initial: "",
       confirmLabel: "Criar",
       onSubmit: (name) =>
-        makeDir.mutate(join(dir, name), {
+        makeDir.mutate(joinPath(dir, name), {
           onSuccess: () => setExpanded(dir, true),
           onError: (e) => toast.error((e as Error).message),
         }),
     });
 
+  // ── ações de nó ────────────────────────────────────────────────────────────
   const onRename = (node: FileNode) => {
-    const parent = node.path.includes("/")
-      ? node.path.slice(0, node.path.lastIndexOf("/"))
-      : "";
+    const parent = dirName(node.path);
     openPrompt({
       title: `Renomear ${node.name}`,
       label: "Novo nome",
@@ -136,15 +241,48 @@ export function Workspace() {
       confirmLabel: "Renomear",
       onSubmit: (name) =>
         rename.mutate(
-          { from: node.path, to: join(parent, name) },
+          { from: node.path, to: joinPath(parent, name) },
           {
-            onSuccess: () => {
-              if (openPath === node.path) openFile(join(parent, name));
-            },
+            onSuccess: () => renameTabPath(node.path, joinPath(parent, name)),
             onError: (e) => toast.error((e as Error).message),
           },
         ),
     });
+  };
+
+  const onMove = (node: FileNode) => {
+    const parent = dirName(node.path);
+    openPrompt({
+      title: `Mover ${node.name}`,
+      label: "Pasta de destino",
+      initial: parent,
+      confirmLabel: "Mover",
+      hint: "Caminho relativo à raiz do workspace (vazio = raiz).",
+      onSubmit: (dest) => onMoveDrop(node.path, dest.trim().replace(/\/+$/, "")),
+    });
+  };
+
+  const onMoveDrop = (src: string, destDir: string) => {
+    if (destDir === dirName(src) || destDir === src || destDir.startsWith(`${src}/`)) return;
+    const to = joinPath(destDir, baseName(src));
+    rename.mutate(
+      { from: src, to },
+      {
+        onSuccess: () => {
+          renameTabPath(src, to);
+          if (destDir) setExpanded(destDir, true);
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+
+  const onDuplicate = (node: FileNode) => {
+    const to = joinPath(dirName(node.path), duplicateName(node.name));
+    copy.mutate(
+      { from: node.path, to },
+      { onError: (e) => toast.error((e as Error).message) },
+    );
   };
 
   const onDelete = async (node: FileNode) => {
@@ -162,8 +300,9 @@ export function Workspace() {
       { path: node.path, recursive: node.type === "dir" },
       {
         onSuccess: () => {
-          if (openPath === node.path) openFile("");
-          if (openPath && openPath.startsWith(`${node.path}/`)) openFile("");
+          for (const p of openPaths) {
+            if (p === node.path || p.startsWith(`${node.path}/`)) closeTab(p);
+          }
         },
         onError: (e) => toast.error((e as Error).message),
       },
@@ -193,10 +332,99 @@ export function Workspace() {
     window.open(downloadUrl(id, node.path), "_blank");
   };
 
-  const onDirtyChange = useCallback(
-    (path: string, dirty: boolean) => markDirty(path, dirty),
-    [markDirty],
+  const onCopyPath = async (node: FileNode, relative: boolean) => {
+    const value = relative ? node.path : logicalAbsPath(id, node.path);
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Caminho copiado");
+    } catch {
+      toast.error("Não foi possível copiar");
+    }
+  };
+
+  const onRun = async (node: FileNode) => {
+    try {
+      const exec = await executeWorkspaceNotebook(id, node.path);
+      toast.success("Execução iniciada");
+      navigate(`/executions/${exec.id}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const onExport = (node: FileNode) => {
+    window.open(downloadUrl(id, node.path), "_blank");
+  };
+
+  const fileItems: PaletteItem[] = useMemo(
+    () =>
+      tree.data
+        ? flattenFiles(tree.data).map((f) => ({
+            id: f.path,
+            label: baseName(f.path),
+            sublabel: dirName(f.path) || "/",
+          }))
+        : [],
+    [tree.data],
   );
+
+  const commandItems: PaletteItem[] = useMemo(
+    () => [
+      { id: "cmd:new-notebook", label: "Criar notebook" },
+      { id: "cmd:new-folder", label: "Criar pasta" },
+      { id: "cmd:run-all", label: "Executar todas as células" },
+      { id: "cmd:restart-kernel", label: "Reiniciar kernel" },
+      { id: "cmd:interrupt-kernel", label: "Interromper kernel" },
+      { id: "cmd:save", label: "Salvar notebook", sublabel: "Ctrl+S" },
+      { id: "cmd:clear-outputs", label: "Limpar saídas" },
+      { id: "cmd:git", label: "Git: abrir painel de alterações" },
+      { id: "cmd:toggle-panel", label: "Alternar painel inferior", sublabel: "Ctrl+J" },
+      { id: "cmd:toggle-explorer", label: "Alternar explorer", sublabel: "Ctrl+B" },
+      { id: "cmd:close-tab", label: "Fechar aba" },
+      { id: "cmd:reopen-tab", label: "Reabrir aba fechada" },
+    ],
+    [],
+  );
+
+  const runCommand = (cmdId: string): void => {
+    switch (cmdId) {
+      case "cmd:new-notebook":
+        setNbDialog({ dir: view.activeTab ? dirName(view.activeTab) : "" });
+        break;
+      case "cmd:new-folder":
+        onNewFolder("");
+        break;
+      case "cmd:run-all":
+      case "cmd:restart-kernel":
+      case "cmd:interrupt-kernel":
+      case "cmd:save":
+      case "cmd:clear-outputs":
+        emitCommand(cmdId.replace("cmd:", ""));
+        break;
+      case "cmd:git":
+        setPanelTab("git");
+        break;
+      case "cmd:toggle-panel":
+        togglePanel();
+        break;
+      case "cmd:toggle-explorer":
+        toggleExplorer();
+        break;
+      case "cmd:close-tab":
+        if (view.activeTab) closeTab(view.activeTab);
+        break;
+      case "cmd:reopen-tab":
+        reopenClosed();
+        break;
+    }
+  };
+
+  useHotkeys({
+    "mod+p": () => setPalette("files"),
+    "mod+shift+p": () => setPalette("commands"),
+    "mod+b": () => toggleExplorer(),
+    "mod+j": () => togglePanel(),
+  });
 
   if (ws.isLoading) {
     return (
@@ -217,85 +445,213 @@ export function Workspace() {
     );
   }
 
+  const iconBtn =
+    "rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg";
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <WorkspaceHeader workspace={ws.data} dirtyCount={dirtyCount} />
 
       <div className="flex min-h-0 flex-1">
         {/* Explorer */}
-        <aside className="flex w-64 shrink-0 flex-col border-r border-surface-border bg-surface">
-          <div className="flex h-9 items-center justify-between px-3 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
-            Explorer
-            <span className="flex gap-1">
-              <button
-                type="button"
-                className="rounded px-1 hover:bg-surface-variant"
-                title="Novo arquivo na raiz"
-                onClick={() => onNewFile("")}
-              >
-                +arq
-              </button>
-              <button
-                type="button"
-                className="rounded px-1 hover:bg-surface-variant"
-                title="Nova pasta na raiz"
-                onClick={() => onNewFolder("")}
-              >
-                +dir
-              </button>
-            </span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {tree.isLoading ? (
-              <div className="flex justify-center py-6 text-fg-faint">
-                <SpinnerIcon className="h-4 w-4 animate-spin" />
+        {view.explorerCollapsed ? (
+          <button
+            type="button"
+            title="Mostrar explorer"
+            className="flex w-8 shrink-0 items-start justify-center border-r border-surface-border bg-surface pt-2"
+            onClick={() => toggleExplorer(true)}
+          >
+            <ExpandIcon className="h-4 w-4 text-fg-faint" />
+          </button>
+        ) : (
+          <>
+            <aside
+              className="flex shrink-0 flex-col border-r border-surface-border bg-surface"
+              style={{ width: view.explorerWidth }}
+            >
+              <div className="flex h-9 items-center justify-between px-2 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+                Explorer
+                <span className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Novo notebook na raiz"
+                    onClick={() => setNbDialog({ dir: "" })}
+                  >
+                    <NotebookIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Novo arquivo na raiz"
+                    onClick={() => onNewFile("")}
+                  >
+                    <FilePlusIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Nova pasta na raiz"
+                    onClick={() => onNewFolder("")}
+                  >
+                    <FolderPlusIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Enviar arquivo para a raiz"
+                    onClick={() => onUpload("")}
+                  >
+                    <UploadIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Recarregar árvore"
+                    onClick={() => void tree.refetch()}
+                  >
+                    <RefreshIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Recolher todas as pastas"
+                    onClick={collapseAllDirs}
+                  >
+                    <CollapseIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconBtn}
+                    title="Ocultar explorer"
+                    onClick={() => toggleExplorer(false)}
+                  >
+                    <CollapseIcon className="h-4 w-4 rotate-180" />
+                  </button>
+                </span>
               </div>
-            ) : tree.data ? (
-              <FileTree
-                root={tree.data}
-                openPath={openPath}
-                expanded={expandedDirs}
-                onToggleDir={toggleDir}
-                onOpenFile={openFile}
-                onNewFile={onNewFile}
-                onNewFolder={onNewFolder}
-                onRename={onRename}
-                onDelete={onDelete}
-                onUpload={onUpload}
-                onDownload={onDownload}
-              />
-            ) : (
-              <p className="px-3 py-2 text-xs text-danger">Falha ao carregar a árvore.</p>
-            )}
-          </div>
-        </aside>
+
+              <div className="px-2 pb-1.5">
+                <div className="flex items-center gap-1.5 rounded border border-surface-border bg-surface px-2 py-1 text-xs">
+                  <SearchIcon className="h-3.5 w-3.5 text-fg-faint" />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar arquivos…"
+                    className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg-faint"
+                  />
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto">
+                {tree.isLoading ? (
+                  <div className="flex justify-center py-6 text-fg-faint">
+                    <SpinnerIcon className="h-4 w-4 animate-spin" />
+                  </div>
+                ) : tree.data ? (
+                  <FileTree
+                    root={tree.data}
+                    filter={search}
+                    openPaths={openPaths}
+                    activePath={view.activeTab}
+                    dirtyPaths={dirtyByPath}
+                    expanded={expandedSet}
+                    onToggleDir={toggleDir}
+                    onOpenFile={(path) => openTab(path)}
+                    onNewNotebook={(dir) => setNbDialog({ dir })}
+                    onNewFile={onNewFile}
+                    onNewFolder={onNewFolder}
+                    onUpload={onUpload}
+                    onRename={onRename}
+                    onMove={onMove}
+                    onDuplicate={onDuplicate}
+                    onDelete={onDelete}
+                    onDownload={onDownload}
+                    onCopyPath={onCopyPath}
+                    onRun={onRun}
+                    onExport={onExport}
+                    onMoveDrop={onMoveDrop}
+                  />
+                ) : (
+                  <p className="px-3 py-2 text-xs text-danger">
+                    Falha ao carregar a árvore.
+                  </p>
+                )}
+              </div>
+            </aside>
+            <div
+              {...explorerResize.handleProps}
+              className={`w-1 shrink-0 cursor-col-resize bg-surface-border transition-colors hover:bg-primary/40 ${
+                explorerResize.dragging ? "bg-primary/60" : ""
+              }`}
+            />
+          </>
+        )}
 
         {/* Editor */}
         <section className="flex min-w-0 flex-1 flex-col bg-surface">
-          {openPath ? (
-            <FilePreview
-              key={openPath}
-              workspaceId={id}
-              path={openPath}
-              onDirtyChange={onDirtyChange}
+          {view.tabs.length > 0 && (
+            <EditorTabs
+              tabs={view.tabs}
+              activeTab={view.activeTab}
+              dirtyByPath={dirtyByPath}
+              onSelect={setActiveTab}
+              onClose={closeTab}
+              onCloseOthers={closeOthers}
+              onCloseRight={closeToRight}
+              onCloseAll={closeAll}
+              onReopen={reopenClosed}
+              onReorder={reorderTabs}
             />
-          ) : (
-            <div className="flex flex-1 items-center justify-center">
-              <EmptyState
-                icon={WorkspaceIcon}
-                title="Nenhum arquivo aberto"
-                description="Escolha um arquivo no explorer para editar."
-              />
-            </div>
           )}
+          <EditorSurface
+            workspaceId={id}
+            tabs={view.tabs}
+            activeTab={view.activeTab}
+            onDirtyChange={onDirtyChange}
+          />
         </section>
       </div>
+
+      <ExecutionPanel workspaceId={id} />
+
+      <div className="flex h-6 shrink-0 items-center gap-3 border-t border-surface-border bg-surface px-3 text-[11px] text-fg-faint">
+        <span>{ws.data.name}</span>
+        <span>·</span>
+        <span>Kernel: {kernelStatus}</span>
+        {dirtyCount > 0 && (
+          <span className="text-warn">{dirtyCount} não salvo(s)</span>
+        )}
+        <span className="ml-auto">{view.activeTab ?? "—"}</span>
+      </div>
+
+      <Palette
+        open={palette === "files"}
+        placeholder="Buscar arquivos…"
+        items={fileItems}
+        onPick={(path) => openTab(path)}
+        onClose={() => setPalette(null)}
+      />
+      <Palette
+        open={palette === "commands"}
+        placeholder="Executar comando…"
+        items={commandItems}
+        onPick={runCommand}
+        onClose={() => setPalette(null)}
+      />
 
       <input
         ref={fileInput}
         type="file"
         className="hidden"
         onChange={(e) => void onFilePicked(e)}
+      />
+
+      <CreateNotebookDialog
+        open={!!nbDialog}
+        defaultDir={nbDialog?.dir ?? ""}
+        onClose={() => setNbDialog(null)}
+        onCreate={createNotebook}
       />
 
       <Dialog
@@ -308,10 +664,10 @@ export function Workspace() {
               Cancelar
             </Button>
             <Button
-              disabled={!promptValue.trim()}
+              disabled={!promptValue.trim() && prompt?.title.startsWith("Mover") !== true}
               onClick={() => {
                 const v = promptValue.trim();
-                if (!v) return;
+                if (!v && prompt?.title.startsWith("Mover") !== true) return;
                 prompt?.onSubmit(v);
                 setPrompt(null);
               }}
@@ -325,9 +681,10 @@ export function Workspace() {
           label={prompt?.label ?? "Nome"}
           value={promptValue}
           autoFocus
+          hint={prompt?.hint}
           onChange={(e) => setPromptValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && promptValue.trim()) {
+            if (e.key === "Enter") {
               prompt?.onSubmit(promptValue.trim());
               setPrompt(null);
             }

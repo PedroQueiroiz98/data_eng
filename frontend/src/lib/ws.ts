@@ -11,6 +11,7 @@ import {
   type JobStatus,
   type JobTask,
 } from "@/lib/jobs";
+import type { KernelEvent, KernelStatus } from "@/lib/kernels";
 import { getAuthToken } from "@/lib/api";
 
 const tokenParam = (): string => {
@@ -144,6 +145,92 @@ export function openExecutionSocket(
       scheduleReconnect();
     };
 
+    socket.onerror = () => socket?.close();
+  }
+
+  connect();
+  return stop;
+}
+
+// ─── Kernel socket ───────────────────────────────────────────────────────────
+
+export interface KernelSnapshot {
+  type: "snapshot";
+  session: {
+    session_id: string;
+    status: KernelStatus;
+    execution_count: number;
+    notebook_path: string;
+  };
+  events: KernelEvent[];
+}
+
+export interface KernelSocketHandlers {
+  onSnapshot?: (e: KernelSnapshot) => void;
+  onEvent?: (e: KernelEvent) => void;
+  onOpen?: () => void;
+  onDisconnect?: () => void;
+}
+
+export function openKernelSocket(
+  sessionId: string,
+  handlers: KernelSocketHandlers,
+  deps: ExecutionSocketDeps = {},
+): () => void {
+  const WS = deps.WebSocketImpl ?? WebSocket;
+  const baseUrl = deps.baseUrl ?? import.meta.env.VITE_WS_BASE_URL ?? "/ws";
+  const maxDelay = deps.maxDelayMs ?? 15_000;
+
+  let socket: WebSocket | null = null;
+  let stopped = false;
+  let lastSeq = 0;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const stop = (): void => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    socket?.close();
+  };
+
+  function url(): string {
+    const proto =
+      typeof location !== "undefined" && location.protocol === "https:" ? "wss" : "ws";
+    const host = typeof location !== "undefined" ? location.host : "localhost";
+    const prefix = baseUrl.startsWith("ws") ? baseUrl : `${proto}://${host}${baseUrl}`;
+    return `${prefix}/kernels/${sessionId}?after_seq=${lastSeq}${tokenParam()}`;
+  }
+
+  function connect(): void {
+    if (stopped) return;
+    socket = new WS(url());
+    socket.onopen = () => {
+      attempt = 0;
+      handlers.onOpen?.();
+    };
+    socket.onmessage = (ev: MessageEvent) => {
+      let evt: KernelEvent | KernelSnapshot;
+      try {
+        evt = JSON.parse(ev.data as string) as KernelEvent | KernelSnapshot;
+      } catch {
+        return;
+      }
+      if (evt.type === "snapshot") {
+        const s = evt as KernelSnapshot;
+        for (const e of s.events) if (e.seq) lastSeq = Math.max(lastSeq, e.seq);
+        handlers.onSnapshot?.(s);
+      } else {
+        const e = evt as KernelEvent;
+        if (e.seq) lastSeq = Math.max(lastSeq, e.seq);
+        handlers.onEvent?.(e);
+      }
+    };
+    socket.onclose = () => {
+      if (stopped) return;
+      handlers.onDisconnect?.();
+      attempt += 1;
+      timer = setTimeout(connect, Math.min(1000 * 2 ** attempt, maxDelay));
+    };
     socket.onerror = () => socket?.close();
   }
 

@@ -88,11 +88,13 @@ export function useWriteFile(id: string) {
       path,
       text,
       notebook,
+      ifMatch,
     }: {
       path: string;
       text?: string;
       notebook?: Record<string, unknown>;
-    }) => writeFile(id, path, { text, notebook }),
+      ifMatch?: string | null;
+    }) => writeFile(id, path, { text, notebook, ifMatch }),
     onSuccess: (_data, vars) => {
       invalidateTree(qc, id);
       void qc.invalidateQueries({ queryKey: keys.file(id, vars.path) });

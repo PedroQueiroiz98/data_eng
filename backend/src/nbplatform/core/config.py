@@ -104,6 +104,39 @@ class Settings(BaseSettings):
     workspace_max_upload_bytes: int = 104_857_600  # 100 MiB
     workspace_tree_max_nodes: int = 5_000
     workspace_tree_max_depth: int = 12
+    # Preview de dados (.csv/.parquet) no Data Viewer.
+    workspace_data_max_rows: int = 500
+
+    # ─── Kernel interativo (processo `kernel-worker`) ───
+    # Interativo = kernel; produção (Jobs) continua sendo Papermill.
+    kernel_enabled: bool = True
+    kernel_startup_timeout_s: float = 60.0
+    kernel_exec_timeout_s: float = 300.0
+    kernel_idle_timeout_s: float = 1800.0
+    kernel_max_sessions: int = 20
+    kernel_reaper_interval_s: float = 60.0
+    kernel_event_buffer: int = 2000
+
+    # ─── Git local do Workspace ───
+    git_op_timeout_s: float = 30.0
+
+    redis_kernel_ops: str = "nbp:kernel:ops"
+    redis_kernel_sess_prefix: str = "nbp:kernel:sess:"
+    redis_kernel_seq_prefix: str = "nbp:kernel:seq:"
+    redis_kernel_log_prefix: str = "nbp:kernel:log:"
+    redis_kernel_event_prefix: str = "nbp:events:kernel:"
+
+    def kernel_sess_key(self, session_id: str) -> str:
+        return f"{self.redis_kernel_sess_prefix}{session_id}"
+
+    def kernel_seq_key(self, session_id: str) -> str:
+        return f"{self.redis_kernel_seq_prefix}{session_id}"
+
+    def kernel_log_key(self, session_id: str) -> str:
+        return f"{self.redis_kernel_log_prefix}{session_id}"
+
+    def kernel_event_channel(self, session_id: str) -> str:
+        return f"{self.redis_kernel_event_prefix}{session_id}"
 
     # Prefixos de chaves Redis (mantidos aqui para não espalhar strings mágicas).
     redis_heartbeat_prefix: str = "nbp:heartbeat:"

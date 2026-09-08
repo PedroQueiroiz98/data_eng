@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -47,6 +50,17 @@ class FileContent:
     path: str
     kind: Literal["notebook", "text", "binary"]
     content: dict[str, Any] | str | None  # json p/ notebook, str p/ texto, None p/ binário
+    etag: str | None = None  # sha1 do conteúdo em disco (detecção de conflito no PUT)
+
+
+@dataclass(slots=True)
+class DataPreview:
+    columns: list[str]
+    dtypes: list[str]
+    rows: list[list[Any]] = field(default_factory=list)
+    total: int | None = None
+    truncated: bool = False
+    offset: int = 0
 
 
 class WorkspaceFsService:
@@ -128,33 +142,54 @@ class WorkspaceFsService:
             raise NotFoundError(f"Arquivo não encontrado: {rel_path}")
         rel = rel_from_root(self.root, target)
         raw = target.read_bytes()
+        etag = hashlib.sha1(raw).hexdigest()
         if len(raw) > _MAX_TEXT_BYTES:
-            return FileContent(path=rel, kind="binary", content=None)
+            return FileContent(path=rel, kind="binary", content=None, etag=etag)
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            return FileContent(path=rel, kind="binary", content=None)
+            return FileContent(path=rel, kind="binary", content=None, etag=etag)
         if b"\x00" in raw[:_TEXT_SNIFF_BYTES]:
-            return FileContent(path=rel, kind="binary", content=None)
+            return FileContent(path=rel, kind="binary", content=None, etag=etag)
         if is_ipynb(rel):
             try:
-                return FileContent(path=rel, kind="notebook", content=json.loads(text))
+                return FileContent(
+                    path=rel, kind="notebook", content=json.loads(text), etag=etag
+                )
             except json.JSONDecodeError:
-                return FileContent(path=rel, kind="text", content=text)
-        return FileContent(path=rel, kind="text", content=text)
+                return FileContent(path=rel, kind="text", content=text, etag=etag)
+        return FileContent(path=rel, kind="text", content=text, etag=etag)
 
     # ── escrita ──────────────────────────────────────────────────────────────
     async def write_file(
-        self, rel_path: str, *, text: str | None, notebook: dict[str, Any] | None
+        self,
+        rel_path: str,
+        *,
+        text: str | None,
+        notebook: dict[str, Any] | None,
+        if_match: str | None = None,
     ) -> FileContent:
-        return await asyncio.to_thread(self._write_file_sync, rel_path, text, notebook)
+        return await asyncio.to_thread(
+            self._write_file_sync, rel_path, text, notebook, if_match
+        )
 
     def _write_file_sync(
-        self, rel_path: str, text: str | None, notebook: dict[str, Any] | None
+        self,
+        rel_path: str,
+        text: str | None,
+        notebook: dict[str, Any] | None,
+        if_match: str | None = None,
     ) -> FileContent:
         target = resolve_within(self.root, rel_path)
         if target.is_dir():
             raise ConflictError(f"{rel_path} é um diretório.")
+        if if_match is not None and target.is_file():
+            current = hashlib.sha1(target.read_bytes()).hexdigest()
+            if current != if_match:
+                raise ConflictError(
+                    "O arquivo mudou no disco desde a última leitura (edição concorrente "
+                    "ou git). Recarregue antes de salvar."
+                )
         if is_ipynb(rel_path):
             if notebook is None:
                 if text is None:
@@ -283,6 +318,48 @@ class WorkspaceFsService:
         buf.seek(0)
         return buf, f"{target.name or 'workspace'}.zip", True
 
+    # ── data viewer (.csv/.parquet) ─────────────────────────────────────────
+    async def read_data(
+        self, rel_path: str, *, offset: int, limit: int
+    ) -> DataPreview:
+        return await asyncio.to_thread(self._read_data_sync, rel_path, offset, limit)
+
+    def _read_data_sync(self, rel_path: str, offset: int, limit: int) -> DataPreview:
+        target = resolve_within(self.root, rel_path)
+        if not target.exists() or not target.is_file():
+            raise NotFoundError(f"Arquivo não encontrado: {rel_path}")
+        ext = target.suffix.lower()
+        if ext == ".parquet":
+            return _preview_parquet(target, offset, limit)
+        if ext in (".csv", ".tsv"):
+            return _preview_csv(target, offset, limit, delimiter="\t" if ext == ".tsv" else ",")
+        raise DomainValidationError(f"Pré-visualização de dados não suportada para {ext}.")
+
+    # ── export de notebook ──────────────────────────────────────────────────
+    async def export_notebook(
+        self, rel_path: str, fmt: str
+    ) -> tuple[bytes, str, str]:
+        return await asyncio.to_thread(self._export_notebook_sync, rel_path, fmt)
+
+    def _export_notebook_sync(self, rel_path: str, fmt: str) -> tuple[bytes, str, str]:
+        target = resolve_within(self.root, rel_path)
+        if not target.exists() or not target.is_file():
+            raise NotFoundError(f"Arquivo não encontrado: {rel_path}")
+        if not is_ipynb(rel_path):
+            raise DomainValidationError("Exportação disponível apenas para .ipynb.")
+        raw = target.read_bytes()
+        stem = target.stem
+        if fmt == "ipynb":
+            return raw, f"{stem}.ipynb", "application/x-ipynb+json"
+        if fmt == "py":
+            import nbformat
+            from nbconvert import PythonExporter
+
+            nb = nbformat.reads(raw.decode("utf-8"), as_version=4)  # type: ignore[no-untyped-call]
+            body, _ = PythonExporter().from_notebook_node(nb)  # type: ignore[no-untyped-call]
+            return body.encode("utf-8"), f"{stem}.py", "text/x-python"
+        raise DomainValidationError(f"Formato de exportação não suportado: {fmt}")
+
     # ── helpers ──────────────────────────────────────────────────────────────
     def _node_for(self, path: Path) -> FileNode:
         rel = rel_from_root(self.root, path)
@@ -312,3 +389,120 @@ class WorkspaceFsService:
 def _silent_unlink(name: str) -> None:
     with contextlib.suppress(OSError):
         os.unlink(name)
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
+
+def _table_to_rows(table: Any) -> tuple[list[str], list[str], list[list[Any]]]:
+    columns = [str(c) for c in table.column_names]
+    dtypes = [str(t) for t in table.schema.types]
+    pydict = table.to_pydict()
+    n = table.num_rows
+    rows = [[_json_safe(pydict[c][i]) for c in columns] for i in range(n)]
+    return columns, dtypes, rows
+
+
+def _preview_parquet(target: Path, offset: int, limit: int) -> DataPreview:
+    import pyarrow.parquet as papq
+
+    pf = papq.ParquetFile(str(target))
+    total = int(pf.metadata.num_rows)
+    collected: list[Any] = []
+    seen = 0
+    want_end = offset + limit
+    for batch in pf.iter_batches(batch_size=max(1, min(limit, 1024))):
+        rows_in_batch = batch.num_rows
+        if seen + rows_in_batch <= offset:
+            seen += rows_in_batch
+            continue
+        collected.append(batch)
+        seen += rows_in_batch
+        if seen >= want_end:
+            break
+    if not collected:
+        schema = pf.schema_arrow
+        return DataPreview(
+            columns=[str(n) for n in schema.names],
+            dtypes=[str(t) for t in schema.types],
+            rows=[],
+            total=total,
+            offset=offset,
+        )
+    import pyarrow as pa
+
+    table = pa.Table.from_batches(collected)
+    local_offset = offset - (seen - table.num_rows)
+    table = table.slice(max(0, local_offset), limit)
+    columns, dtypes, rows = _table_to_rows(table)
+    return DataPreview(
+        columns=columns,
+        dtypes=dtypes,
+        rows=rows,
+        total=total,
+        truncated=offset + len(rows) < total,
+        offset=offset,
+    )
+
+
+def _preview_csv(target: Path, offset: int, limit: int, *, delimiter: str) -> DataPreview:
+    import pyarrow as pa
+    import pyarrow.csv as pacsv
+
+    reader = pacsv.open_csv(
+        str(target),
+        parse_options=pacsv.ParseOptions(delimiter=delimiter),
+        read_options=pacsv.ReadOptions(block_size=1 << 20),
+    )
+    want_end = offset + limit
+    collected: list[Any] = []
+    seen = 0
+    exhausted = False
+    while seen < want_end:
+        try:
+            batch = reader.read_next_batch()
+        except StopIteration:
+            exhausted = True
+            break
+        if batch.num_rows == 0:
+            exhausted = True
+            break
+        if seen + batch.num_rows <= offset:
+            seen += batch.num_rows
+            continue
+        collected.append(batch)
+        seen += batch.num_rows
+    if not collected:
+        schema = reader.schema
+        return DataPreview(
+            columns=[str(n) for n in schema.names],
+            dtypes=[str(t) for t in schema.types],
+            rows=[],
+            total=seen if exhausted else None,
+            offset=offset,
+        )
+    table = pa.Table.from_batches(collected)
+    local_offset = offset - (seen - table.num_rows)
+    table = table.slice(max(0, local_offset), limit)
+    columns, dtypes, rows = _table_to_rows(table)
+    # `total` só é conhecido se o stream se esgotou dentro da janela lida; caso
+    # contrário fica None (o front mostra "N+ linhas" + "Carregar mais").
+    total = seen if exhausted else None
+    truncated = total is None or (offset + len(rows) < total)
+    return DataPreview(
+        columns=columns,
+        dtypes=dtypes,
+        rows=rows,
+        total=total,
+        truncated=truncated,
+        offset=offset,
+    )

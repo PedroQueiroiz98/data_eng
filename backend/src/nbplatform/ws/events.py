@@ -30,6 +30,13 @@ async def publish_job_event(redis: Redis, job_id: str, event: dict[str, Any]) ->
     await redis.publish(channel, json.dumps(event, default=str))
 
 
+async def publish_kernel_event(
+    redis: Redis, session_id: str, event: dict[str, Any]
+) -> None:
+    channel = get_settings().kernel_event_channel(session_id)
+    await redis.publish(channel, json.dumps(event, default=str))
+
+
 @asynccontextmanager
 async def subscribe_channel(
     redis: Redis, channel: str
@@ -63,3 +70,7 @@ def subscribe_execution_events(redis: Redis, execution_id: str) -> _Sub:
 
 def subscribe_job_events(redis: Redis, job_id: str) -> _Sub:
     return subscribe_channel(redis, get_settings().job_event_channel(job_id))
+
+
+def subscribe_kernel_events(redis: Redis, session_id: str) -> _Sub:
+    return subscribe_channel(redis, get_settings().kernel_event_channel(session_id))

@@ -44,6 +44,7 @@ export interface FileContent {
   path: string;
   kind: FileKind;
   content: Record<string, unknown> | string | null;
+  etag?: string | null;
 }
 
 // ─── Workspace CRUD ─────────────────────────────────────────────────────────
@@ -96,9 +97,13 @@ export const readFile = (id: string, path: string): Promise<FileContent> =>
 export const writeFile = (
   id: string,
   path: string,
-  body: { text?: string; notebook?: Record<string, unknown> },
+  body: { text?: string; notebook?: Record<string, unknown>; ifMatch?: string | null },
 ): Promise<FileContent> =>
-  apiPut(`/workspaces/${id}/file?path=${encodeURIComponent(path)}`, body);
+  apiPut(
+    `/workspaces/${id}/file?path=${encodeURIComponent(path)}`,
+    { text: body.text, notebook: body.notebook },
+    body.ifMatch ? { "If-Match": body.ifMatch } : undefined,
+  );
 
 export const makeDir = (id: string, path: string): Promise<FileNode> =>
   apiPost(`/workspaces/${id}/dir?path=${encodeURIComponent(path)}`);
@@ -116,6 +121,22 @@ export const copyEntry = (id: string, from: string, to: string): Promise<FileNod
 
 export const downloadUrl = (id: string, path: string): string =>
   `${API_BASE}/workspaces/${id}/download?path=${encodeURIComponent(path)}`;
+
+export interface WorkspaceExecution {
+  id: string;
+  status: string;
+}
+
+/** Dispara execução de produção (Papermill) de um `.ipynb` do workspace. */
+export const executeWorkspaceNotebook = (
+  id: string,
+  notebookPath: string,
+  parameters: Record<string, unknown> = {},
+): Promise<WorkspaceExecution> =>
+  apiPost(`/workspaces/${id}/execute`, {
+    notebook_path: notebookPath,
+    parameters,
+  });
 
 export async function uploadFile(
   id: string,
