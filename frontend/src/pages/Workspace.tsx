@@ -124,6 +124,7 @@ export function Workspace() {
     renamePrefix,
     forgetUnder,
     setExpanded,
+    toggleDir,
     markDirty,
     setExplorerWidth,
     toggleExplorer,
@@ -619,6 +620,8 @@ export function Workspace() {
                 loading={tree.isLoading}
                 currentDir={currentDir}
                 setCurrentDir={setCurrentDir}
+                expandedDirs={view.expandedDirs}
+                onToggleDir={toggleDir}
                 openPaths={openPaths}
                 activePath={view.activeTab}
                 dirtyPaths={dirtyByPath}
