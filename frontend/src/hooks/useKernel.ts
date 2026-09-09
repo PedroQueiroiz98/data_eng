@@ -13,6 +13,8 @@ export interface UseKernel {
   status: KernelStatus;
   connected: boolean;
   executionCount: number;
+  /** id da sessão de kernel (null enquanto não abriu) */
+  sessionId: string | null;
   runCell: (cellId: string, code: string) => Promise<"ok" | "error">;
   interrupt: () => void;
   restart: () => void;
@@ -31,6 +33,7 @@ export function useKernel(
   const [status, setStatus] = useState<KernelStatus>("starting");
   const [connected, setConnected] = useState(false);
   const [executionCount, setExecutionCount] = useState(0);
+  const [sessionIdState, setSessionIdState] = useState<string | null>(null);
   const sessionId = useRef<string | null>(null);
   const pending = useRef(new Map<string, (r: "ok" | "error") => void>());
   const onEventRef = useRef(onEvent);
@@ -61,6 +64,7 @@ export function useKernel(
       .then((s) => {
         if (cancelled) return;
         sessionId.current = s.session_id;
+        setSessionIdState(s.session_id);
         setStatus(s.status);
         setExecutionCount(s.execution_count);
         close = openKernelSocket(s.session_id, {
@@ -81,6 +85,7 @@ export function useKernel(
       close?.();
       pending.current.forEach((r) => r("error"));
       pending.current.clear();
+      setSessionIdState(null);
     };
   }, [workspaceId, notebookPath]);
 
@@ -107,5 +112,13 @@ export function useKernel(
     if (sessionId.current) void restartKernel(workspaceId, sessionId.current);
   }, [workspaceId]);
 
-  return { status, connected, executionCount, runCell, interrupt, restart };
+  return {
+    status,
+    connected,
+    executionCount,
+    sessionId: sessionIdState,
+    runCell,
+    interrupt,
+    restart,
+  };
 }

@@ -266,8 +266,8 @@ async def test_disabled_provider_is_skipped(client) -> None:
 # ── dispatch / isolamento / retry ──────────────────────────────────────
 async def test_provider_failure_isolated_from_others(client) -> None:
     await _clear_providers(client)
-    ok = await _create(client, _email_body(name="ok"))
-    bad = await _create(client, _bitrix_body(name="bad"))  # host fake → falha
+    await _create(client, _email_body(name="ok"))
+    await _create(client, _bitrix_body(name="bad"))  # host fake → falha
     job_id = await _run_failing(client, "wf-iso")
 
     reg = default_registry(email_sender=_StubOK())

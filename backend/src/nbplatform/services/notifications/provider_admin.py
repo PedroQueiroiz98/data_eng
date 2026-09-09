@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,7 +103,7 @@ async def get_provider(
 def _validate(
     registry: NotificationProviderRegistry,
     provider_type: NotificationProviderType,
-    configuration: dict,
+    configuration: dict[str, Any],
     *,
     has_secret: bool,
 ) -> None:

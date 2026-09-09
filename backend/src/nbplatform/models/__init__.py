@@ -1,6 +1,7 @@
 """Modelos SQLAlchemy. Importa todos os agregados para o metadata do Alembic."""
 
 from nbplatform.db.base import Base
+from nbplatform.models.assistant import AssistantInteraction, AssistantProvider
 from nbplatform.models.audit import AuditLog
 from nbplatform.models.config_vars import Secret, Variable
 from nbplatform.models.execution import Execution, ExecutionLog
@@ -21,6 +22,8 @@ from nbplatform.models.workspace import (
 
 __all__ = [
     "Base",
+    "AssistantInteraction",
+    "AssistantProvider",
     "AuditLog",
     "Workspace",
     "WorkspaceGitRepository",

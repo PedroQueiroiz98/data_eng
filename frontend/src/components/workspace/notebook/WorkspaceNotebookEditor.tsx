@@ -14,8 +14,12 @@ import { useEditorConfig } from "@/lib/editorConfig";
 import type { KernelEvent } from "@/lib/kernels";
 import { lspDiagnostics, type LspDiagnostic, type LspLocation } from "@/lib/lsp";
 import { wsCellModelPath } from "@/lib/lspShared";
-import { setLspDoc } from "@/lib/monacoProviders";
+import { setLspDoc, setLspKernel } from "@/lib/monacoProviders";
 import { setWorkspaceFsContext } from "@/lib/monacoProviders";
+import { assistantStream } from "@/lib/assistant";
+import { setNotebookAiContext } from "@/lib/assistantContext";
+import { useAssistantStore } from "@/store/assistant";
+import type { AiCommandDetail } from "@/components/assistant/AiCellMenu";
 import type { NotebookContent } from "@/lib/notebooks";
 import type { FileNode } from "@/lib/workspace";
 import { downloadExport } from "@/lib/workspaceData";
@@ -150,8 +154,16 @@ export function WorkspaceNotebookEditor({
     if (!e.cell_id) return;
     if (e.type === "cell.started") {
       dispatch({ type: "runStart", id: e.cell_id });
+      useAssistantStore.getState().setCellError(e.cell_id, null);
     } else if ((e.type === "cell.output" || e.type === "cell.error") && e.output) {
       dispatch({ type: "cellOutput", id: e.cell_id, output: e.output });
+      if (e.type === "cell.error" && e.output.output_type === "error") {
+        useAssistantStore.getState().setCellError(e.cell_id, {
+          ename: e.output.ename ?? "",
+          evalue: e.output.evalue ?? "",
+          traceback: e.output.traceback ?? [],
+        });
+      }
     } else if (e.type === "cell.finished") {
       dispatch({
         type: "runFinish",
@@ -173,6 +185,16 @@ export function WorkspaceNotebookEditor({
     }
   }, [active, kernel.status, kernel.connected]);
 
+  // publica a sessão de kernel p/ o autocomplete ciente de objetos vivos
+  useEffect(() => {
+    if (!active || !kernel.sessionId) {
+      setLspKernel(null);
+      return;
+    }
+    setLspKernel({ sessionId: kernel.sessionId, status: kernel.status });
+    return () => setLspKernel(null);
+  }, [active, kernel.sessionId, kernel.status]);
+
   // publica o "documento lógico" para os providers do Monaco (só a aba ativa)
   const cellIds = state.cells.map((c) => c.id).join(",");
   useEffect(() => {
@@ -188,6 +210,69 @@ export function WorkspaceNotebookEditor({
     });
     return () => setLspDoc(null);
   }, [active, cellIds, workspaceId, path, navigateToCell]);
+
+  // ── assistente de IA ──────────────────────────────────────────────────────
+  const aiCtx = useCallback(
+    (cellId?: string, selection?: string) => {
+      const cells = stateRef.current.cells;
+      const idx = cellId ? cells.findIndex((c) => c.id === cellId) : -1;
+      const err = cellId ? useAssistantStore.getState().lastErrorByCell[cellId] : undefined;
+      return {
+        cells: cells.map((c) => c.source),
+        active_cell_index: idx >= 0 ? idx : 0,
+        notebook_path: path,
+        session_id: null,
+        selection: selection ?? null,
+        recent_error: err ?? null,
+      };
+    },
+    [path],
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    setNotebookAiContext({
+      forCell: (cellId, opts) => aiCtx(cellId, opts?.selection),
+      overview: () => aiCtx(focusedCell ?? undefined),
+    });
+    return () => setNotebookAiContext(null);
+  }, [active, aiCtx, focusedCell]);
+
+  const runAi = useCallback(
+    async (d: AiCommandDetail) => {
+      const cell = stateRef.current.cells.find((c) => c.id === d.cellId);
+      if (!cell) return;
+      const store = useAssistantStore.getState();
+      store.setResult(d.cellId, {
+        task: d.task,
+        text: "",
+        streaming: true,
+        error: null,
+        originalSource: cell.source,
+      });
+      await assistantStream(
+        {
+          task: d.task,
+          context: aiCtx(d.cellId),
+          instruction: d.instruction ?? null,
+          target_language: d.targetLanguage ?? null,
+          cell_id: d.cellId,
+        },
+        {
+          onDelta: (t) => useAssistantStore.getState().appendDelta(d.cellId, t),
+          onDone: ({ error }) => useAssistantStore.getState().finishResult(d.cellId, error),
+        },
+      );
+    },
+    [aiCtx],
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    const onCmd = (e: Event) => void runAi((e as CustomEvent<AiCommandDetail>).detail);
+    window.addEventListener("nbp:ai-command", onCmd as EventListener);
+    return () => window.removeEventListener("nbp:ai-command", onCmd as EventListener);
+  }, [active, runAi]);
 
   // contexto de arquivos do Workspace p/ completion de caminhos em strings
   useEffect(() => {
@@ -552,6 +637,21 @@ export function WorkspaceNotebookEditor({
             onRegisterEditor={registerEditor}
             onNavigate={navigateToCell}
             onShowLocations={(title, locations) => setLocPanel({ title, locations })}
+            onAiInsert={(id, code) => {
+              const c = stateRef.current.cells.find((x) => x.id === id);
+              dispatch({ type: "setSource", id, source: (c?.source ?? "") + code });
+            }}
+            onAiInsertBelow={(id, code) => {
+              dispatch({ type: "add", afterId: id, cellType: "code" });
+              // a nova célula é a próxima; preenche no próximo tick
+              setTimeout(() => {
+                const cells = stateRef.current.cells;
+                const at = cells.findIndex((x) => x.id === id);
+                const next = cells[at + 1];
+                if (next) dispatch({ type: "setSource", id: next.id, source: code });
+              }, 0);
+            }}
+            onAiReplace={(id, code) => dispatch({ type: "setSource", id, source: code })}
           />
         ))}
         {state.cells.length === 0 && (

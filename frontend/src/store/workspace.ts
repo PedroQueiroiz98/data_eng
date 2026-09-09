@@ -20,7 +20,7 @@ export interface WorkspaceView {
   explorerCollapsed: boolean;
   panelHeight: number;
   panelCollapsed: boolean;
-  panelTab: "execution" | "output" | "problems" | "git";
+  panelTab: "execution" | "output" | "problems" | "git" | "assistant";
 }
 
 export interface AutosaveConfig {

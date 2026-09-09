@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { AiChatPanel } from "@/components/assistant/AiChatPanel";
 import { GitPanel } from "@/components/workspace/GitPanel";
 import { useResizable } from "@/hooks/useResizable";
 import { selectView, useWorkspaceStore, type WorkspaceView } from "@/store/workspace";
@@ -10,6 +11,7 @@ const TABS: { id: WorkspaceView["panelTab"]; label: string }[] = [
   { id: "output", label: "Output" },
   { id: "problems", label: "Problems" },
   { id: "git", label: "Git" },
+  { id: "assistant", label: "✨ AI" },
 ];
 
 export function ExecutionPanel({ workspaceId }: { workspaceId: string }) {
@@ -88,6 +90,7 @@ export function ExecutionPanel({ workspaceId }: { workspaceId: string }) {
           </p>
         )}
         {view.panelTab === "git" && <GitPanel workspaceId={workspaceId} />}
+        {view.panelTab === "assistant" && <AiChatPanel />}
       </div>
     </div>
   );

@@ -53,8 +53,17 @@ class Settings(BaseSettings):
     # roda a mesma imagem do worker/kernel). "" => usa sys.executable.
     lsp_environment_path: str = ""
     lsp_timeout_s: float = 10.0
+    # Timeout curto das operações por-tecla (completion/hover/signature). O
+    # caminho rápido do Jedi (sem projeto) é ~80-100ms quente; 3s cobre a folga
+    # sem deixar o cliente pendurado.
+    lsp_completion_timeout_s: float = 3.0
+    # Threads dedicadas ao Jedi (não compartilha o executor default do app).
+    lsp_pool_workers: int = 4
     lsp_max_source_chars: int = 200_000
     lsp_max_completions: int = 100
+    # Quantos itens de completion recebem `detail` de assinatura já na 1ª resposta
+    # (o resto resolve sob demanda via POST /api/lsp/resolve).
+    lsp_complete_signature_scan: int = 12
 
     # ─── Central de Notificações ───
     # Providers (EMAIL/BITRIX) e seus secrets são configurados 100% pela UI
@@ -134,6 +143,26 @@ class Settings(BaseSettings):
     kernel_max_sessions: int = 20
     kernel_reaper_interval_s: float = 60.0
     kernel_event_buffer: int = 2000
+    # Autocomplete ciente do kernel: usa `complete_request`/`inspect_request` do
+    # Jupyter (introspecção, NÃO executa código) quando a sessão está ociosa.
+    kernel_complete_enabled: bool = True
+    kernel_complete_timeout_s: float = 1.5
+
+    # ─── Assistente de IA (editor de notebooks) ───
+    # Providers (OpenAI/Azure/Ollama) e suas API keys são configurados 100% pela
+    # UI (/assistant, admin) e persistidos no banco (key cifrada, Fernet). Aqui
+    # só ficam timeouts/limites e flags — NUNCA credenciais.
+    assistant_enabled: bool = True
+    assistant_request_timeout_s: float = 45.0
+    assistant_inline_timeout_s: float = 2.5
+    assistant_inline_max_tokens: int = 64
+    assistant_max_output_tokens: int = 1536
+    assistant_context_max_chars: int = 12000
+    assistant_context_max_cells: int = 12
+    assistant_http_connect_timeout_s: float = 5.0
+    # Guarda o texto gerado no histórico (o prompt/contexto NUNCA é persistido).
+    assistant_store_result_text: bool = True
+    assistant_rate_limit_per_min: int = 30
 
     # ─── Git local do Workspace ───
     git_op_timeout_s: float = 30.0
@@ -143,6 +172,11 @@ class Settings(BaseSettings):
     redis_kernel_seq_prefix: str = "nbp:kernel:seq:"
     redis_kernel_log_prefix: str = "nbp:kernel:log:"
     redis_kernel_event_prefix: str = "nbp:events:kernel:"
+    # Chave de resposta (request/reply) para complete/inspect do kernel.
+    redis_kernel_rpc_prefix: str = "nbp:kernel:rpc:"
+
+    def kernel_rpc_key(self, request_id: str) -> str:
+        return f"{self.redis_kernel_rpc_prefix}{request_id}"
 
     def kernel_sess_key(self, session_id: str) -> str:
         return f"{self.redis_kernel_sess_prefix}{session_id}"

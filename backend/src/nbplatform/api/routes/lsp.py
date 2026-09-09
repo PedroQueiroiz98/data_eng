@@ -6,11 +6,13 @@ as rotas respondem 200 mesmo em falha do motor, com `ok=false`.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from pathlib import Path
 
 from fastapi import APIRouter
 
-from nbplatform.api.deps import CurrentUser
+from nbplatform.api.deps import CurrentUser, RedisDep
 from nbplatform.core.config import get_settings
 from nbplatform.schemas.lsp import (
     AutoImportRequest,
@@ -29,9 +31,13 @@ from nbplatform.schemas.lsp import (
     LocationsResponse,
     LspHealthResponse,
     ReferencesRequest,
+    ResolveRequest,
+    ResolveResponse,
     SignatureRequest,
     SignatureResponse,
 )
+from nbplatform.services.lsp import kernel_bridge
+from nbplatform.services.lsp.jedi_backend import Completion
 from nbplatform.services.lsp.service import LspResult, get_lsp_service
 
 router = APIRouter(prefix="/api/lsp", tags=["lsp"])
@@ -50,14 +56,63 @@ async def lsp_health() -> LspHealthResponse:
     return LspHealthResponse.model_validate(get_lsp_service().health())
 
 
+_WORD_TAIL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+
+
+async def _kernel_completions(
+    req: CompletionRequest, user: CurrentUser, redis: RedisDep
+) -> kernel_bridge.KernelCompletion | None:
+    """Completions do kernel vivo — só se a sessão for do usuário e estiver ociosa."""
+    settings = get_settings()
+    if not (req.session_id and settings.kernel_complete_enabled):
+        return None
+    if req.cell_index >= len(req.cells):
+        return None
+    try:
+        meta = await redis.hgetall(settings.kernel_sess_key(req.session_id))
+    except Exception:  # noqa: BLE001
+        return None
+    meta = {str(k): str(v) for k, v in (meta or {}).items()}
+    if not meta or meta.get("user_id") != str(user.id) or meta.get("status") != "idle":
+        return None
+    code = req.cells[req.cell_index]
+    cursor_pos = kernel_bridge.cursor_offset(code, req.line, req.column)
+    try:
+        return await asyncio.wait_for(
+            kernel_bridge.request_completion(
+                redis, req.session_id, code, cursor_pos, settings.kernel_complete_timeout_s
+            ),
+            timeout=settings.kernel_complete_timeout_s + 0.5,
+        )
+    except Exception:  # noqa: BLE001 - qualquer falha → só Jedi
+        return None
+
+
 @router.post("/completions", response_model=CompletionResponse)
-async def completions(req: CompletionRequest, user: CurrentUser) -> CompletionResponse:
-    r = await get_lsp_service().complete(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
-    )
+async def completions(
+    req: CompletionRequest, user: CurrentUser, redis: RedisDep
+) -> CompletionResponse:
+    # Caminho rápido do Jedi (sem projeto/CWD): completion não passa `_ws_root`.
+    r = await get_lsp_service().complete(req.cells, req.cell_index, req.line, req.column)
+    items: list[Completion] = list(r.completions)
+    engine = r.engine
+    if r.ok:
+        kc = await _kernel_completions(req, user, redis)
+        if kc:
+            prefix_match = _WORD_TAIL.search(
+                req.cells[req.cell_index][
+                    : kernel_bridge.cursor_offset(
+                        req.cells[req.cell_index], req.line, req.column
+                    )
+                ]
+            )
+            items = kernel_bridge.merge(
+                items, kc, prefix_match.group(0) if prefix_match else ""
+            )
+            engine = "jedi+kernel"
     return CompletionResponse(
         ok=r.ok,
-        engine=r.engine,
+        engine=engine,
         took_ms=r.took_ms,
         items=[
             CompletionItemOut(
@@ -66,17 +121,31 @@ async def completions(req: CompletionRequest, user: CurrentUser) -> CompletionRe
                 kind=c.kind,
                 detail=c.detail,
                 documentation=c.documentation,
+                call=c.call,
             )
-            for c in r.completions
+            for c in items
         ],
+    )
+
+
+@router.post("/resolve", response_model=ResolveResponse)
+async def resolve(req: ResolveRequest, user: CurrentUser) -> ResolveResponse:
+    r = await get_lsp_service().resolve(
+        req.cells, req.cell_index, req.line, req.column, req.label
+    )
+    item = r.completions[0] if r.completions else None
+    return ResolveResponse(
+        ok=r.ok,
+        took_ms=r.took_ms,
+        detail=item.detail if item else "",
+        documentation=item.documentation if item else "",
+        kind=item.kind if item else "",
     )
 
 
 @router.post("/hover", response_model=HoverResponse)
 async def hover(req: HoverRequest, user: CurrentUser) -> HoverResponse:
-    r = await get_lsp_service().hover(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
-    )
+    r = await get_lsp_service().hover(req.cells, req.cell_index, req.line, req.column)
     if not r.hover:
         return HoverResponse(ok=r.ok, took_ms=r.took_ms)
     h = r.hover
@@ -93,9 +162,7 @@ async def hover(req: HoverRequest, user: CurrentUser) -> HoverResponse:
 
 @router.post("/signature", response_model=SignatureResponse)
 async def signature(req: SignatureRequest, user: CurrentUser) -> SignatureResponse:
-    r = await get_lsp_service().signature(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
-    )
+    r = await get_lsp_service().signature(req.cells, req.cell_index, req.line, req.column)
     if not r.signature:
         return SignatureResponse(ok=r.ok, took_ms=r.took_ms)
     s = r.signature

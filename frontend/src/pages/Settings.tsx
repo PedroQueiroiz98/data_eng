@@ -3,12 +3,15 @@ import { Link } from "react-router-dom";
 import { useAuthContext } from "@/components/AuthProvider";
 import { fetchReadiness, type Readiness } from "@/lib/api";
 import { useEditorConfig } from "@/lib/editorConfig";
+import { useAssistantAvailability } from "@/hooks/useAssistant";
 import { Card, PageHeader, Switch } from "@/ui";
 import { LogsIcon } from "@/ui/icons";
 
 export function Settings() {
   const { user } = useAuthContext();
   const { config, setSection, reset } = useEditorConfig();
+  const availability = useAssistantAvailability().data;
+  const aiConfigured = !!availability?.configured;
   const { data } = useQuery<Readiness>({
     queryKey: ["readiness"],
     queryFn: fetchReadiness,
@@ -79,16 +82,37 @@ export function Settings() {
             onChange={(v) => setSection("editor", { hover: v })}
             label="Documentação ao passar o mouse"
           />
-          <Switch
-            checked={config.editor.inlineSuggestions}
-            onChange={(v) => setSection("editor", { inlineSuggestions: v })}
-            label="Sugestões inline (IA) — em breve"
-          />
-          <Switch
-            checked={config.ai.enabled}
-            onChange={(v) => setSection("ai", { enabled: v })}
-            label="Assistente de IA — em breve"
-          />
+          <div>
+            <Switch
+              checked={config.editor.inlineSuggestions && aiConfigured}
+              onChange={(v) => setSection("editor", { inlineSuggestions: v })}
+              label="Sugestões inline (IA)"
+            />
+            {(!aiConfigured || !availability?.inline_enabled) && (
+              <p className="mt-0.5 text-[11px] text-fg-faint">
+                Configure um provedor em{" "}
+                <Link to="/assistant" className="text-primary hover:underline">
+                  /assistant
+                </Link>
+                .
+              </p>
+            )}
+          </div>
+          <div>
+            <Switch
+              checked={config.ai.enabled}
+              onChange={(v) => setSection("ai", { enabled: v })}
+              label="Assistente de IA no editor"
+            />
+            <p className="mt-0.5 text-[11px] text-fg-faint">
+              {aiConfigured
+                ? `Provedor: ${availability?.provider_type}`
+                : "Nenhum provedor configurado."}{" "}
+              <Link to="/assistant" className="text-primary hover:underline">
+                gerenciar
+              </Link>
+            </p>
+          </div>
         </div>
         <p className="mt-3 text-xs text-fg-faint">
           Language server: <span className="font-mono">{config.python.languageServer}</span>. Se o

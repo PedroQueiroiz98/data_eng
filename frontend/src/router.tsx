@@ -7,6 +7,7 @@ import { Executions } from "@/pages/Executions";
 import { JobDetail } from "@/pages/JobDetail";
 import { Jobs } from "@/pages/Jobs";
 import { Login } from "@/pages/Login";
+import { AssistantPage } from "@/pages/AssistantPage";
 import { NotificationsPage } from "@/pages/NotificationsPage";
 import { Schedules } from "@/pages/Schedules";
 import { Workspace } from "@/pages/Workspace";
@@ -37,6 +38,7 @@ export const router = createBrowserRouter(
             { path: "executions/:id", element: <ExecutionDetail /> },
             { path: "schedules", element: <Schedules /> },
             { path: "notifications", element: <NotificationsPage /> },
+            { path: "assistant", element: <AssistantPage /> },
             { path: "variables", element: <Variables /> },
             { path: "secrets", element: <Secrets /> },
             { path: "settings", element: <Settings /> },

@@ -1,7 +1,7 @@
 """Orquestra as operações do editor inteligente sobre o módulo virtual.
 
 - stateless por request (recebe as células, monta o módulo virtual);
-- roda o Jedi (síncrono) em thread com timeout;
+- roda o Jedi (síncrono) num pool de threads dedicado, com timeout por operação;
 - mapeia posições de volta para (célula, linha, coluna);
 - filtra identificadores sensíveis (password, token, ...);
 - degradação graciosa: qualquer falha → resultado vazio + `ok=False`.
@@ -15,6 +15,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -62,6 +63,15 @@ class LspService:
     def __init__(self) -> None:
         self.settings = get_settings()
         self._healthy = True
+        # Pool dedicado: um `complete` patológico (Jedi não é cancelável) não
+        # pode mais starvar o executor default compartilhado com o resto do app.
+        self._pool = ThreadPoolExecutor(
+            max_workers=max(1, self.settings.lsp_pool_workers),
+            thread_name_prefix="jedi",
+        )
+        # Supersessão de completion: um `complete` mais novo torna o resultado
+        # de um mais antivo obsoleto (evita "pilha" de sugestões atrasadas).
+        self._complete_gen = 0
         if self.settings.lsp_enabled:
             jedi_backend.warmup()
 
@@ -78,14 +88,18 @@ class LspService:
             return None
         return vm
 
-    async def _run(self, fn: Callable[..., Any], *args: Any) -> Any:
+    async def _run(
+        self, fn: Callable[..., Any], *args: Any, timeout: float | None = None
+    ) -> Any:
+        loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(fn, *args), timeout=self.settings.lsp_timeout_s
+                loop.run_in_executor(self._pool, fn, *args),
+                timeout=timeout if timeout is not None else self.settings.lsp_timeout_s,
             )
         except Exception as exc:  # noqa: BLE001 - qualquer falha vira degradação graciosa
             self._healthy = False
-            logger.warning("lsp op falhou (%s): %s", fn.__name__, exc)
+            logger.warning("lsp op falhou (%s): %s", getattr(fn, "__name__", fn), exc)
             return None
 
     # ── operações ──────────────────────────────────────────────────────────
@@ -95,9 +109,11 @@ class LspService:
         cell_index: int,
         line: int,
         column: int,
-        workspace_root: str | None = None,
+        workspace_root: str | None = None,  # noqa: ARG002 - caminho rápido ignora
     ) -> LspResult:
         started = time.perf_counter()
+        self._complete_gen += 1
+        gen = self._complete_gen
         vm = self._prepare(cells)
         if vm is None:
             return LspResult(ok=False)
@@ -112,13 +128,49 @@ class LspService:
             abs_col,
             self.env_path,
             self.settings.lsp_max_completions,
-            workspace_root,
+            self.settings.lsp_complete_signature_scan,
+            timeout=self.settings.lsp_completion_timeout_s,
         )
+        if gen != self._complete_gen:
+            # superado por um request mais novo — descarta sem mexer em `_healthy`
+            return LspResult(ok=False, took_ms=_ms(started))
         if items is None:
             return LspResult(ok=False, took_ms=_ms(started))
         self._healthy = True
         filtered = [c for c in items if not is_sensitive_name(c.label)]
         return LspResult(ok=True, completions=filtered, took_ms=_ms(started))
+
+    async def resolve(
+        self,
+        cells: list[str],
+        cell_index: int,
+        line: int,
+        column: int,
+        label: str,
+    ) -> LspResult:
+        started = time.perf_counter()
+        vm = self._prepare(cells)
+        if vm is None:
+            return LspResult(ok=False)
+        try:
+            abs_line, abs_col = vm.to_absolute(cell_index, line, column)
+        except IndexError:
+            return LspResult(ok=False)
+        item: Completion | None = await self._run(
+            jedi_backend.resolve,
+            vm.source,
+            abs_line,
+            abs_col,
+            label,
+            self.env_path,
+            timeout=self.settings.lsp_completion_timeout_s,
+        )
+        if item is None:
+            return LspResult(ok=False, took_ms=_ms(started))
+        self._healthy = True
+        if is_sensitive_name(item.label):
+            return LspResult(ok=True, took_ms=_ms(started))
+        return LspResult(ok=True, completions=[item], took_ms=_ms(started))
 
     async def hover(
         self,
@@ -126,7 +178,7 @@ class LspService:
         cell_index: int,
         line: int,
         column: int,
-        workspace_root: str | None = None,
+        workspace_root: str | None = None,  # noqa: ARG002 - caminho rápido ignora
     ) -> LspResult:
         started = time.perf_counter()
         vm = self._prepare(cells)
@@ -137,7 +189,12 @@ class LspService:
         except IndexError:
             return LspResult(ok=False)
         info: HoverInfo | None = await self._run(
-            jedi_backend.hover, vm.source, abs_line, abs_col, self.env_path, workspace_root
+            jedi_backend.hover,
+            vm.source,
+            abs_line,
+            abs_col,
+            self.env_path,
+            timeout=self.settings.lsp_completion_timeout_s,
         )
         if info is None:
             return LspResult(ok=False, took_ms=_ms(started))
@@ -152,7 +209,7 @@ class LspService:
         cell_index: int,
         line: int,
         column: int,
-        workspace_root: str | None = None,
+        workspace_root: str | None = None,  # noqa: ARG002 - caminho rápido ignora
     ) -> LspResult:
         started = time.perf_counter()
         vm = self._prepare(cells)
@@ -168,7 +225,7 @@ class LspService:
             abs_line,
             abs_col,
             self.env_path,
-            workspace_root,
+            timeout=self.settings.lsp_completion_timeout_s,
         )
         if info is None:
             return LspResult(ok=False, took_ms=_ms(started))

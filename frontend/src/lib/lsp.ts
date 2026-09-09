@@ -9,6 +9,19 @@ import { getAuthToken } from "@/lib/api";
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const DEFAULT_TIMEOUT_MS = 4000;
 
+// Timeouts por operação. As operações por-tecla (completion/hover/signature) são
+// curtas de propósito: o servidor tem um timeout casado (`lsp_completion_timeout_s`),
+// então um Jedi lento é abortado dos dois lados em vez de pendurar o editor.
+export const TIMEOUTS = {
+  complete: 3000,
+  hover: 2500,
+  signature: 2000,
+  definition: 6000,
+  references: 6000,
+  diagnostics: 6000,
+  resolve: 3000,
+} as const;
+
 export interface WorkspaceLspContext {
   /** dá ao Jedi ciência dos arquivos do Workspace (scripts/*.py) */
   workspaceId?: string;
@@ -20,6 +33,8 @@ export interface Position extends WorkspaceLspContext {
   cellIndex: number;
   line: number; // 0-based
   column: number; // 0-based
+  /** sessão de kernel ativa → completions cientes de objetos vivos */
+  sessionId?: string;
 }
 
 export interface CompletionItem {
@@ -28,12 +43,21 @@ export interface CompletionItem {
   kind: string;
   detail: string;
   documentation: string;
+  /** chamável (função/método/classe) — o editor acrescenta `(...)` */
+  call?: boolean;
 }
 export interface CompletionResult {
   ok: boolean;
   engine: string;
   took_ms: number;
   items: CompletionItem[];
+}
+
+export interface ResolveResult {
+  ok: boolean;
+  detail: string;
+  documentation: string;
+  kind: string;
 }
 
 export interface HoverResult {
@@ -103,8 +127,25 @@ export interface LspHealth {
   environment_path: string;
 }
 
-async function post<T>(path: string, body: unknown, notOk: T, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+interface PostOpts {
+  timeoutMs?: number;
+  /** cancelamento externo (ex.: `token.onCancellationRequested` do Monaco) */
+  signal?: AbortSignal;
+}
+
+async function post<T>(
+  path: string,
+  body: unknown,
+  notOk: T,
+  opts: PostOpts = {},
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ctrl = new AbortController();
+  const onExternalAbort = () => ctrl.abort();
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener("abort", onExternalAbort, { once: true });
+  }
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const token = getAuthToken();
@@ -124,6 +165,7 @@ async function post<T>(path: string, body: unknown, notOk: T, timeoutMs = DEFAUL
     return notOk;
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -134,35 +176,55 @@ const posBody = (p: Position) => ({
   column: p.column,
   workspace_id: p.workspaceId,
   notebook_path: p.notebookPath,
+  session_id: p.sessionId,
 });
 
-export const lspComplete = (p: Position): Promise<CompletionResult> =>
-  post("/lsp/completions", posBody(p), { ok: false, engine: "jedi", took_ms: 0, items: [] });
+export const lspComplete = (p: Position, signal?: AbortSignal): Promise<CompletionResult> =>
+  post(
+    "/lsp/completions",
+    posBody(p),
+    { ok: false, engine: "jedi", took_ms: 0, items: [] },
+    { timeoutMs: TIMEOUTS.complete, signal },
+  );
 
-export const lspHover = (p: Position): Promise<HoverResult> =>
-  post("/lsp/hover", posBody(p), {
-    ok: false,
-    name: "",
-    kind: "",
-    full_name: "",
-    signature: "",
-    documentation: "",
+export const lspResolve = (
+  p: Position & { label: string },
+  signal?: AbortSignal,
+): Promise<ResolveResult> =>
+  post(
+    "/lsp/resolve",
+    { ...posBody(p), label: p.label },
+    { ok: false, detail: "", documentation: "", kind: "" },
+    { timeoutMs: TIMEOUTS.resolve, signal },
+  );
+
+export const lspHover = (p: Position, signal?: AbortSignal): Promise<HoverResult> =>
+  post(
+    "/lsp/hover",
+    posBody(p),
+    { ok: false, name: "", kind: "", full_name: "", signature: "", documentation: "" },
+    { timeoutMs: TIMEOUTS.hover, signal },
+  );
+
+export const lspSignature = (p: Position, signal?: AbortSignal): Promise<SignatureResult> =>
+  post(
+    "/lsp/signature",
+    posBody(p),
+    { ok: false, label: "", parameters: [], active_parameter: 0, documentation: "" },
+    { timeoutMs: TIMEOUTS.signature, signal },
+  );
+
+export const lspDefinition = (p: Position, signal?: AbortSignal): Promise<LocationsResult> =>
+  post("/lsp/definition", posBody(p), { ok: false, locations: [] }, {
+    timeoutMs: TIMEOUTS.definition,
+    signal,
   });
 
-export const lspSignature = (p: Position): Promise<SignatureResult> =>
-  post("/lsp/signature", posBody(p), {
-    ok: false,
-    label: "",
-    parameters: [],
-    active_parameter: 0,
-    documentation: "",
+export const lspReferences = (p: Position, signal?: AbortSignal): Promise<LocationsResult> =>
+  post("/lsp/references", posBody(p), { ok: false, locations: [] }, {
+    timeoutMs: TIMEOUTS.references,
+    signal,
   });
-
-export const lspDefinition = (p: Position): Promise<LocationsResult> =>
-  post("/lsp/definition", posBody(p), { ok: false, locations: [] });
-
-export const lspReferences = (p: Position): Promise<LocationsResult> =>
-  post("/lsp/references", posBody(p), { ok: false, locations: [] });
 
 export const lspDiagnostics = (
   cells: string[],
@@ -172,7 +234,7 @@ export const lspDiagnostics = (
     "/lsp/diagnostics",
     { cells, workspace_id: ctx?.workspaceId, notebook_path: ctx?.notebookPath },
     { ok: false, took_ms: 0, items: [] },
-    6000,
+    { timeoutMs: TIMEOUTS.diagnostics },
   );
 
 export const lspAutoImport = (name: string): Promise<AutoImportResult> =>

@@ -24,5 +24,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // `monaco-editor` real é ESM pesado e não resolve no jsdom — stub nos testes.
+    alias: { "monaco-editor": path.resolve(__dirname, "src/test/monacoMock.ts") },
   },
 });

@@ -207,7 +207,9 @@ def test_email_validate_config_requires_host_and_recipients() -> None:
 def _bitrix_target(*, bot: bool = True, dialog_id: str = "chat3129") -> ResolvedTarget:
     cfg = {
         "url": "https://empresa.bitrix24.com.br",
-        "send_message_path": "/rest/1/abc/imbot.message.add" if bot else "/rest/1/abc/im.message.add",
+        "send_message_path": (
+            "/rest/1/abc/imbot.message.add" if bot else "/rest/1/abc/im.message.add"
+        ),
         "bot_id": "93" if bot else "",
         "dialog_id": dialog_id,
     }

@@ -4,6 +4,9 @@ import * as monacoNS from "monaco-editor";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { CellOutputList } from "@/components/notebook/mime/CellOutput";
+import { AiCellMenu } from "@/components/assistant/AiCellMenu";
+import { AiInlineWidget } from "@/components/assistant/AiInlineWidget";
+import { AiResultCard } from "@/components/assistant/AiResultCard";
 import { getEditorConfig } from "@/lib/editorConfig";
 import {
   lspDefinition,
@@ -11,6 +14,7 @@ import {
   type LspDiagnostic,
   type LspLocation,
 } from "@/lib/lsp";
+import { getAssistantState, useAssistantStore } from "@/store/assistant";
 import type { RunStatus, WCell } from "@/store/workspaceNotebook";
 import {
   AddIcon,
@@ -45,6 +49,9 @@ interface Props {
   ) => void;
   onNavigate: (cellIndex: number, line: number, column: number) => void;
   onShowLocations: (title: string, locations: LspLocation[]) => void;
+  onAiInsert: (id: string, code: string) => void;
+  onAiInsertBelow: (id: string, code: string) => void;
+  onAiReplace: (id: string, code: string) => void;
 }
 
 const STATUS_DOT: Record<RunStatus, string> = {
@@ -83,8 +90,15 @@ export function WorkspaceCell({
   onRegisterEditor,
   onNavigate,
   onShowLocations,
+  onAiInsert,
+  onAiInsertBelow,
+  onAiReplace,
 }: Props) {
   const isCode = cell.cell_type === "code";
+  const aiResult = useAssistantStore((s) => s.resultByCell[cell.id]);
+  const setAiResult = useAssistantStore((s) => s.setResult);
+  const aiAvailable =
+    useAssistantStore((s) => s.available) && getEditorConfig().ai.enabled;
   const [mdEditing, setMdEditing] = useState(cell.source.trim() === "");
   const editorRef = useRef<monacoNS.editor.IStandaloneCodeEditor | null>(null);
   const lines = cell.source.split("\n").length;
@@ -125,6 +139,18 @@ export function WorkspaceCell({
         const local = res.locations.find((l) => !l.external && l.cell_index >= 0);
         if (local) onNavigate(local.cell_index, local.line, local.column);
         else onShowLocations("Definição (biblioteca externa)", res.locations);
+      },
+    });
+    editor.addAction({
+      id: "nbp.ai.ask",
+      label: "Perguntar à IA (Ctrl+K)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK],
+      contextMenuGroupId: "1_ai",
+      contextMenuOrder: 0.1,
+      run() {
+        if (getEditorConfig().ai.enabled && getAssistantState().available) {
+          getAssistantState().openAsk(cell.id);
+        }
       },
     });
     editor.addAction({
@@ -221,6 +247,7 @@ export function WorkspaceCell({
             : ""}
         </span>
         <div className="ml-auto flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          {isCode && <AiCellMenu cellId={cell.id} />}
           <button type="button" className="btn-cell" disabled={index === 0} onClick={() => onMove(cell.id, "up")} title="Mover para cima">↑</button>
           <button type="button" className="btn-cell" disabled={index === total - 1} onClick={() => onMove(cell.id, "down")} title="Mover para baixo">↓</button>
           <button type="button" className="btn-cell" onClick={() => onDuplicate(cell.id)} title="Duplicar">
@@ -234,6 +261,8 @@ export function WorkspaceCell({
           </button>
         </div>
       </div>
+
+      {isCode && <AiInlineWidget cellId={cell.id} />}
 
       {cell.cell_type === "markdown" && !mdEditing ? (
         <div
@@ -261,6 +290,7 @@ export function WorkspaceCell({
             suggestOnTriggerCharacters: getEditorConfig().editor.autocomplete,
             parameterHints: { enabled: getEditorConfig().editor.signatureHelp },
             hover: { enabled: getEditorConfig().editor.hover },
+            inlineSuggest: { enabled: getEditorConfig().editor.inlineSuggestions },
             wordWrap: isCode ? "off" : "on",
           }}
         />
@@ -279,6 +309,50 @@ export function WorkspaceCell({
       )}
 
       {isCode && <CellOutputList outputs={cell.outputs} />}
+
+      {isCode && cell.runStatus === "error" && !aiResult && aiAvailable && (
+        <div className="flex items-center gap-2 border-t border-danger/20 bg-danger/5 px-3 py-1.5 text-xs text-danger">
+          ⚠️ Erro de execução
+          <button
+            type="button"
+            className="rounded bg-danger/15 px-2 py-0.5 font-medium hover:bg-danger/25"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent("nbp:ai-command", {
+                  detail: { task: "FIX", cellId: cell.id },
+                }),
+              )
+            }
+          >
+            Corrigir com IA
+          </button>
+        </div>
+      )}
+
+      {aiResult && (
+        <div className="px-3 pb-2">
+          <AiResultCard
+            task={aiResult.task}
+            text={aiResult.text}
+            streaming={aiResult.streaming}
+            error={aiResult.error}
+            originalSource={aiResult.originalSource}
+            onInsert={(code) => {
+              onAiInsert(cell.id, code);
+              setAiResult(cell.id, null);
+            }}
+            onInsertBelow={(code) => {
+              onAiInsertBelow(cell.id, code);
+              setAiResult(cell.id, null);
+            }}
+            onReplace={(code) => {
+              onAiReplace(cell.id, code);
+              setAiResult(cell.id, null);
+            }}
+            onReject={() => setAiResult(cell.id, null)}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -94,6 +94,7 @@ class KernelSessionManager:
                 secret_values=secret_values,
                 startup_timeout=self.settings.kernel_startup_timeout_s,
                 exec_timeout=self.settings.kernel_exec_timeout_s,
+                reply=self._rpc_reply,
             )
             self.sessions[session_id] = sess
             emit = self._emitter(session_id)
@@ -138,6 +139,42 @@ class KernelSessionManager:
             return
         await sess.enqueue(
             {"op": "execute", "cell_id": cell_id, "code": code, "request_id": request_id}
+        )
+
+    async def _rpc_reply(self, request_id: str, payload: dict[str, Any]) -> None:
+        if not request_id:
+            return
+        key = self.settings.kernel_rpc_key(request_id)
+        with contextlib.suppress(Exception):
+            await self.redis.rpush(key, json.dumps(payload, default=str))
+            await self.redis.expire(key, 10)
+
+    async def complete(
+        self, session_id: str, code: str, cursor_pos: int, request_id: str
+    ) -> None:
+        """Enfileira um `complete_request` só se a sessão estiver realmente ociosa.
+
+        Nunca chama `ensure()` — se o kernel não está de pé, o cliente cai no
+        Jedi. Se está ocupado ou com fila, idem (a introspecção sentaria atrás
+        de execuções).
+        """
+        sess = self.sessions.get(session_id)
+        if sess is None or sess.status != "idle" or not sess.queue.empty():
+            await self._rpc_reply(request_id, {"matches": []})
+            return
+        await sess.enqueue(
+            {"op": "__complete__", "code": code, "cursor_pos": cursor_pos, "request_id": request_id}
+        )
+
+    async def inspect(
+        self, session_id: str, code: str, cursor_pos: int, request_id: str
+    ) -> None:
+        sess = self.sessions.get(session_id)
+        if sess is None or sess.status != "idle" or not sess.queue.empty():
+            await self._rpc_reply(request_id, {"found": False, "text": ""})
+            return
+        await sess.enqueue(
+            {"op": "__inspect__", "code": code, "cursor_pos": cursor_pos, "request_id": request_id}
         )
 
     async def interrupt(self, session_id: str) -> None:
@@ -222,6 +259,10 @@ class KernelSessionManager:
                 await self.ensure(sid)
             elif kind == "execute":
                 await self.execute(sid, op["cell_id"], op["code"], op["request_id"])
+            elif kind == "complete":
+                await self.complete(sid, op["code"], op["cursor_pos"], op["request_id"])
+            elif kind == "inspect":
+                await self.inspect(sid, op["code"], op["cursor_pos"], op["request_id"])
             elif kind == "interrupt":
                 await self.interrupt(sid)
             elif kind == "restart":

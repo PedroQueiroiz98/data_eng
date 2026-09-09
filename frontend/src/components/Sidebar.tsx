@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 import { Tooltip } from "@/ui/Tooltip";
 import {
   BellIcon,
+  ChatIcon,
   CollapseIcon,
   DashboardIcon,
   ExpandIcon,
@@ -29,6 +30,7 @@ const ITEMS: Item[] = [
   { label: "Execuções", to: "/executions", Icon: HistoryIcon },
   { label: "Agendamentos", to: "/schedules", Icon: ScheduleIcon },
   { label: "Notificações", to: "/notifications", Icon: BellIcon },
+  { label: "Assistente IA", to: "/assistant", Icon: ChatIcon },
   { label: "Variáveis", to: "/variables", Icon: VariableIcon },
   { label: "Secrets", to: "/secrets", Icon: SecretIcon },
 ];

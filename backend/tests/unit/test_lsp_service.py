@@ -103,3 +103,40 @@ async def test_health_reports_engine(svc: LspService) -> None:
     h = svc.health()
     assert h["engine"] == "jedi"
     assert h["enabled"] is True
+
+
+async def test_completion_fast_even_with_workspace_root(svc: LspService) -> None:
+    # completion ignora `workspace_root` (caminho rápido do Jedi)
+    cells = ["clientes = []", "clientes."]
+    r = await svc.complete(
+        cells, cell_index=1, line=0, column=len("clientes."), workspace_root="/nope"
+    )
+    assert r.ok
+    assert any(c.label == "append" for c in r.completions)
+
+
+async def test_resolve_returns_detail_and_doc(svc: LspService) -> None:
+    cells = ["def greet(name):\n    '''Say hi.'''\n    return name", "greet"]
+    r = await svc.resolve(cells, cell_index=1, line=0, column=len("greet"), label="greet")
+    assert r.ok
+    assert r.completions
+    assert "hi" in r.completions[0].documentation.lower()
+
+
+async def test_completion_supersession_drops_stale_result(svc: LspService) -> None:
+    # bump manual do contador simula um request mais novo chegando no meio
+    cells = ["import os", "os."]
+
+    async def _bump() -> None:
+        svc._complete_gen += 1
+
+    orig = svc._run
+
+    async def _run_then_bump(fn: object, *args: object, **kw: object) -> object:
+        res = await orig(fn, *args, **kw)  # type: ignore[arg-type]
+        await _bump()
+        return res
+
+    svc._run = _run_then_bump  # type: ignore[assignment,method-assign]
+    r = await svc.complete(cells, cell_index=1, line=0, column=3)
+    assert r.ok is False

@@ -86,3 +86,38 @@ async def test_auto_import_endpoint(
     body = r.json()
     assert body["ok"] is True
     assert any(expected_module in s["module"] for s in body["suggestions"])
+
+
+async def test_resolve_endpoint_returns_doc(client: httpx.AsyncClient) -> None:
+    r = await client.post(
+        "/api/lsp/resolve",
+        json={
+            "cells": ["def greet(name):\n    '''Say hi.'''\n    return name", "greet"],
+            "cell_index": 1,
+            "line": 0,
+            "column": 5,
+            "label": "greet",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert "hi" in body["documentation"].lower()
+
+
+async def test_completions_with_bogus_session_id_still_ok(client: httpx.AsyncClient) -> None:
+    r = await client.post(
+        "/api/lsp/completions",
+        json={
+            "cells": ["clientes = []", "clientes."],
+            "cell_index": 1,
+            "line": 0,
+            "column": 9,
+            "session_id": "not-a-real-session",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert "append" in {i["label"] for i in body["items"]}
+    assert body["took_ms"] < 2500

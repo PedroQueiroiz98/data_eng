@@ -21,10 +21,16 @@ class _PositionRequest(_WorkspaceCtx):
     cell_index: int = Field(ge=0)
     line: int = Field(ge=0)
     column: int = Field(ge=0)
+    # opcional: sessão de kernel interativo → completions cientes de objetos vivos
+    session_id: str | None = Field(default=None, max_length=40)
 
 
 class CompletionRequest(_PositionRequest):
     pass
+
+
+class ResolveRequest(_PositionRequest):
+    label: str = Field(min_length=1, max_length=200)
 
 
 class HoverRequest(_PositionRequest):
@@ -58,6 +64,7 @@ class CompletionItemOut(BaseModel):
     kind: str
     detail: str = ""
     documentation: str = ""
+    call: bool = False
 
 
 class CompletionResponse(BaseModel):
@@ -65,6 +72,14 @@ class CompletionResponse(BaseModel):
     engine: str = "jedi"
     took_ms: float = 0.0
     items: list[CompletionItemOut] = Field(default_factory=list)
+
+
+class ResolveResponse(BaseModel):
+    ok: bool
+    took_ms: float = 0.0
+    detail: str = ""
+    documentation: str = ""
+    kind: str = ""
 
 
 class HoverResponse(BaseModel):

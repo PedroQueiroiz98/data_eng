@@ -30,6 +30,7 @@ import {
 import { selectView, useWorkspaceStore } from "@/store/workspace";
 import { useWorkspaceRuntime } from "@/store/workspaceRuntime";
 import { useHotkeys } from "@/hooks/useHotkeys";
+import { useAssistantAvailability } from "@/hooks/useAssistant";
 import { Palette, type PaletteItem } from "@/components/Palette";
 import {
   CreateNotebookDialog,
@@ -106,6 +107,7 @@ export function Workspace() {
 
   const ws = useWorkspace();
   const tree = useWorkspaceTree();
+  useAssistantAvailability();
 
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const view = useWorkspaceStore(selectView);

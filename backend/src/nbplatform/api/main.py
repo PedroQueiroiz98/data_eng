@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from nbplatform.api.deps import get_current_user
 from nbplatform.api.routes import (
+    assistant,
     audit,
     auth,
     executions,
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
         workspaces,
         kernels,
         git,
+        assistant,
     ):
         app.include_router(module.router, dependencies=protected)
 
