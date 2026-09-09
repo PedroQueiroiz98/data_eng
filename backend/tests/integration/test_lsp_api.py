@@ -33,6 +33,30 @@ async def test_completions_endpoint_notebook_context(client: httpx.AsyncClient) 
     assert "append" in labels
 
 
+async def test_completions_accepts_single_workspace_id_placeholder(
+    client: httpx.AsyncClient,
+) -> None:
+    """O frontend manda `workspace_id: "root"` (modo single-workspace) — não é
+    UUID. O valor não é lido pela rota (`_ws_root()` usa só o usuário
+    autenticado), mas o schema não pode rejeitar a requisição por isso."""
+    r = await client.post(
+        "/api/lsp/completions",
+        json={
+            "cells": ["clientes = []", "clientes."],
+            "cell_index": 1,
+            "line": 0,
+            "column": 9,
+            "workspace_id": "root",
+            "notebook_path": "teste.ipynb",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    labels = {i["label"] for i in body["items"]}
+    assert "append" in labels
+
+
 async def test_diagnostics_endpoint_flags_undefined_name(client: httpx.AsyncClient) -> None:
     r = await client.post(
         "/api/lsp/diagnostics",

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from pydantic import BaseModel, Field
 
 MAX_CELLS = 500
@@ -12,7 +10,11 @@ MAX_CELL_CHARS = 100_000
 
 class _WorkspaceCtx(BaseModel):
     # Opcionais: dão ao Jedi ciência dos arquivos do Workspace (scripts/*.py).
-    workspace_id: uuid.UUID | None = None
+    # workspace_id não é um UUID de fato — no modelo single-workspace o cliente
+    # manda a string fixa "root" (ver Workspace.tsx); o valor nem é lido pela
+    # rota (`_ws_root()` deriva a raiz só pelo usuário autenticado), então o
+    # tipo aqui só precisa aceitar string livre para não quebrar a validação.
+    workspace_id: str | None = None
     notebook_path: str | None = Field(default=None, max_length=1024)
 
 
