@@ -130,7 +130,7 @@ export function registerPythonIntelligence(): void {
       if (idx < 0 || !activeDoc) return { suggestions: [] };
 
       try {
-        await debounce(model.uri.toString(), 120, token);
+        await debounce(model.uri.toString(), 60, token);
       } catch {
         return { suggestions: [] };
       }

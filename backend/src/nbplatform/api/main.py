@@ -37,6 +37,7 @@ from nbplatform.core.errors import DomainError
 from nbplatform.core.logging import configure_logging
 from nbplatform.db.session import dispose_engine
 from nbplatform.queue.redis_client import close_redis
+from nbplatform.services.lsp.service import get_lsp_service
 from nbplatform.services.seed import ensure_admin_user
 from nbplatform.services.workspace_service import ensure_singleton_workspace
 from nbplatform.services.workspace_watcher import run_workspace_watcher
@@ -59,6 +60,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             logger.exception("seed falhou (seguindo mesmo assim)")
         if settings.workspace_events_enabled:
             watcher_task = asyncio.create_task(run_workspace_watcher(watcher_stop))
+        get_lsp_service().warmup_libraries_background()
     yield
     watcher_stop.set()
     if watcher_task is not None:

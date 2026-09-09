@@ -75,6 +75,12 @@ class LspService:
         if self.settings.lsp_enabled:
             jedi_backend.warmup()
 
+    def warmup_libraries_background(self) -> None:
+        """Aquece pandas/numpy no pool dedicado, fora do request path (ver lifespan
+        da API). Não bloqueia: só agenda no `ThreadPoolExecutor` e retorna."""
+        if self.settings.lsp_enabled:
+            self._pool.submit(jedi_backend.warmup_libraries)
+
     @property
     def env_path(self) -> str:
         return self.settings.lsp_environment_path or ""

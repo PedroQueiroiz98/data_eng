@@ -125,6 +125,27 @@ def warmup() -> None:
         _script_fast("import os\nos.getcwd", "").goto(2, 8)
 
 
+# libs de dados de uso mais comum em notebooks — a 1ª inferência de cada uma é
+# cara (parso+typeshed dos stubs) o bastante pra estourar `lsp_completion_timeout_s`
+# num `df.`/`np.` real do usuário se ainda não tiver sido tocada no processo.
+_COMMON_LIBS = (
+    ("import pandas as pd", "pd.DataFrame()"),
+    ("import numpy as np", "np.array([])"),
+)
+
+
+@functools.lru_cache(maxsize=1)
+def warmup_libraries() -> None:
+    """Aquece libs populares fora do caminho de request (ver `warmup_libraries_background`
+    em `service.py`). Best-effort: lib ausente/lenta não afeta nada — roda em
+    background, sem bloquear o event loop nem o startup da API."""
+    for prelude, obj_expr in _COMMON_LIBS:
+        line2 = f"{obj_expr}."
+        source = f"{prelude}\n{line2}"
+        with contextlib.suppress(Exception):
+            _script_fast(source, "").complete(2, len(line2))
+
+
 def _clamp(source: str, line: int, column: int) -> tuple[int, int]:
     lines = source.split("\n")
     line = max(1, min(line, len(lines)))
