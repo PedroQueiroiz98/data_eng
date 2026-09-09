@@ -5,6 +5,7 @@ from nbplatform.models.assistant import AssistantInteraction, AssistantProvider
 from nbplatform.models.audit import AuditLog
 from nbplatform.models.config_vars import Secret, Variable
 from nbplatform.models.execution import Execution, ExecutionLog
+from nbplatform.models.github_account import UserGitHubAccount
 from nbplatform.models.job import Job, JobLog, JobTask
 from nbplatform.models.notebook import Notebook, NotebookVersion
 from nbplatform.models.notification import (
@@ -32,6 +33,7 @@ __all__ = [
     "Variable",
     "Execution",
     "ExecutionLog",
+    "UserGitHubAccount",
     "Job",
     "JobLog",
     "JobTask",

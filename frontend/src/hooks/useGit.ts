@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   gitBranches,
@@ -8,6 +9,10 @@ import {
   gitDiscard,
   gitInit,
   gitLog,
+  gitMergeAbort,
+  gitPull,
+  gitPush,
+  gitRemoteLink,
   gitStatus,
 } from "@/lib/git";
 
@@ -19,6 +24,15 @@ const keys = {
 };
 
 export function useGitStatus(id: string, enabled = true) {
+  const qc = useQueryClient();
+  // reage na hora ao salvar um arquivo no Workspace, sem esperar o poll de 5s
+  useEffect(() => {
+    if (!enabled) return;
+    const onFsChange = () => void qc.invalidateQueries({ queryKey: keys.status(id) });
+    window.addEventListener("nbp:fs-change", onFsChange);
+    return () => window.removeEventListener("nbp:fs-change", onFsChange);
+  }, [enabled, id, qc]);
+
   return useQuery({
     queryKey: keys.status(id),
     queryFn: () => gitStatus(id),
@@ -85,4 +99,35 @@ export function useGitDiscard(id: string) {
     mutationFn: (paths: string[]) => gitDiscard(id, paths),
     onSuccess: inv,
   });
+}
+
+export function useGitRemoteLink(id: string) {
+  const inv = useInvalidateGit(id);
+  return useMutation({
+    mutationFn: ({
+      repoFullName,
+      branch,
+      baseDir,
+    }: {
+      repoFullName: string;
+      branch: string;
+      baseDir: string;
+    }) => gitRemoteLink(id, repoFullName, branch, baseDir),
+    onSuccess: inv,
+  });
+}
+
+export function useGitPush(id: string) {
+  const inv = useInvalidateGit(id);
+  return useMutation({ mutationFn: () => gitPush(id), onSuccess: inv });
+}
+
+export function useGitPull(id: string) {
+  const inv = useInvalidateGit(id);
+  return useMutation({ mutationFn: () => gitPull(id), onSuccess: inv });
+}
+
+export function useGitMergeAbort(id: string) {
+  const inv = useInvalidateGit(id);
+  return useMutation({ mutationFn: () => gitMergeAbort(id), onSuccess: inv });
 }

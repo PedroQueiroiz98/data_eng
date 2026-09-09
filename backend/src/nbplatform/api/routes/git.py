@@ -1,6 +1,7 @@
-"""Git local do Workspace único (`/root`): status / diff / log / branches / commit / checkout.
-
-Sem remoto (push/pull/clone) nesta rodada.
+"""Git local do Workspace único (`/root`): status / diff / log / branches /
+commit / checkout / discard + remoto GitHub (remote link / push / pull /
+merge abort — usa o PAT do usuário conectado em `/api/github`, ver
+`services/github/account_service.py`).
 """
 
 from __future__ import annotations
@@ -21,10 +22,14 @@ from nbplatform.schemas.git import (
     GitCommitResult,
     GitDiffRead,
     GitDiscardRequest,
+    GitPullRead,
+    GitPushResult,
+    GitRemoteLinkRequest,
     GitStatusRead,
 )
 from nbplatform.services.audit_service import AuditService
 from nbplatform.services.git_service import GitService
+from nbplatform.services.github import account_service as github_account_service
 from nbplatform.services.workspace_service import SINGLETON_WORKSPACE_ID
 
 router = APIRouter(prefix="/api/workspace/git", tags=["git"])
@@ -137,3 +142,87 @@ async def git_discard(
     await _svc(access.user.id).discard(payload.paths)
     await _audit(session, access.user.id, "WORKSPACE_GIT_DISCARD", count=len(payload.paths))
     return {"discarded": len(payload.paths)}
+
+
+def _remote_url(repo_full_name: str) -> str:
+    # sem credenciais na URL — o PAT vai só no header de auth por chamada
+    # (`GitService._run_authed`), nunca gravado em `.git/config`.
+    return f"https://github.com/{repo_full_name}.git"
+
+
+@router.post("/remote", response_model=GitPullRead, status_code=status.HTTP_201_CREATED)
+async def git_remote_link(
+    payload: GitRemoteLinkRequest,
+    session: SessionDep,
+    access: WorkspaceEditor,
+) -> GitPullRead:
+    """"Inicializar Repositório no Workspace": vincula o repo GitHub escolhido
+    e traz seu conteúdo pro Workspace (clone/merge inicial)."""
+    await github_account_service.link_repo(
+        session,
+        access.user.id,
+        repo_full_name=payload.repo_full_name,
+        default_branch=payload.branch,
+        base_dir=payload.base_dir,
+    )
+    _, token = await github_account_service.require_account_and_token(session, access.user.id)
+    result = await _svc(access.user.id).init_from_remote(
+        token,
+        _remote_url(payload.repo_full_name),
+        payload.branch,
+        author_name=access.user.name or "",
+        author_email=access.user.email or "",
+    )
+    if not result.conflicts:
+        await github_account_service.mark_synced(session, access.user.id)
+    await _audit(
+        session,
+        access.user.id,
+        "WORKSPACE_GIT_REMOTE_LINK",
+        repo=payload.repo_full_name,
+        branch=payload.branch,
+        conflicts=len(result.conflicts),
+    )
+    return GitPullRead(conflicts=result.conflicts)
+
+
+@router.post("/push", response_model=GitPushResult)
+async def git_push(session: SessionDep, access: WorkspaceEditor) -> GitPushResult:
+    account, token = await github_account_service.require_account_and_token(
+        session, access.user.id
+    )
+    svc = _svc(access.user.id)
+    st = await svc.status()
+    branch = st.branch or account.repo_default_branch or "main"
+    await svc.push(token, branch)
+    await github_account_service.mark_synced(session, access.user.id)
+    await _audit(session, access.user.id, "WORKSPACE_GIT_PUSH", branch=branch)
+    return GitPushResult(branch=branch)
+
+
+@router.post("/pull", response_model=GitPullRead)
+async def git_pull(session: SessionDep, access: WorkspaceEditor) -> GitPullRead:
+    account, token = await github_account_service.require_account_and_token(
+        session, access.user.id
+    )
+    svc = _svc(access.user.id)
+    st = await svc.status()
+    branch = st.branch or account.repo_default_branch or "main"
+    result = await svc.pull(token, branch)
+    if not result.conflicts:
+        await github_account_service.mark_synced(session, access.user.id)
+    await _audit(
+        session,
+        access.user.id,
+        "WORKSPACE_GIT_PULL",
+        branch=branch,
+        conflicts=len(result.conflicts),
+    )
+    return GitPullRead(conflicts=result.conflicts)
+
+
+@router.post("/merge/abort")
+async def git_merge_abort(session: SessionDep, access: WorkspaceEditor) -> dict[str, bool]:
+    await _svc(access.user.id).abort_merge()
+    await _audit(session, access.user.id, "WORKSPACE_GIT_MERGE_ABORT")
+    return {"aborted": True}

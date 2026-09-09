@@ -13,6 +13,8 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   changes: GitChange[];
+  merging: boolean;
+  remote_configured: boolean;
 }
 
 export interface GitCommitEntry {
@@ -60,3 +62,22 @@ export const gitCommit = (
 
 export const gitDiscard = (_id: string, paths: string[]): Promise<{ discarded: number }> =>
   apiPost(`${BASE}/discard`, { paths });
+
+export interface GitPullResult {
+  conflicts: string[];
+}
+
+export const gitRemoteLink = (
+  _id: string,
+  repoFullName: string,
+  branch: string,
+  baseDir: string,
+): Promise<GitPullResult> =>
+  apiPost(`${BASE}/remote`, { repo_full_name: repoFullName, branch, base_dir: baseDir });
+
+export const gitPush = (_id?: string): Promise<{ branch: string }> => apiPost(`${BASE}/push`);
+
+export const gitPull = (_id?: string): Promise<GitPullResult> => apiPost(`${BASE}/pull`);
+
+export const gitMergeAbort = (_id?: string): Promise<{ aborted: boolean }> =>
+  apiPost(`${BASE}/merge/abort`);

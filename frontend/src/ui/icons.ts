@@ -26,6 +26,8 @@ export {
   Table2 as TableFileIcon,
   Upload as UploadIcon,
   GitCommitHorizontal as GitCommitIcon,
+  Github as GithubIcon,
+  LogIn as ConnectIcon,
   // ações
   Plus as AddIcon,
   Pencil as EditIcon,

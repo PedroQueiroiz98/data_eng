@@ -22,6 +22,10 @@ class GitStatusRead(BaseModel):
     ahead: int = 0
     behind: int = 0
     changes: list[GitChangeRead] = []
+    # merge em andamento (conflito de um `pull`/"Inicializar" anterior, ainda
+    # não resolvido) e se há um remoto (`origin`) configurado.
+    merging: bool = False
+    remote_configured: bool = False
 
 
 class GitCommitRead(BaseModel):
@@ -62,3 +66,23 @@ class GitDiscardRequest(BaseModel):
 
 class GitCommitResult(BaseModel):
     sha: str
+
+
+class GitRemoteLinkRequest(BaseModel):
+    """"Inicializar Repositório no Workspace": vincula + faz o sync inicial."""
+
+    repo_full_name: str = Field(min_length=1, max_length=300)  # "owner/repo"
+    branch: str = Field(min_length=1, max_length=200)
+    base_dir: str = Field(default="", max_length=500)
+
+
+class GitPullRead(BaseModel):
+    """Resultado de um `pull`/"Inicializar": lista de caminhos em conflito, se
+    houver — um pull com conflitos não é um erro HTTP, é um estado válido que
+    o usuário resolve editando os arquivos e comitando (ou abortando o merge)."""
+
+    conflicts: list[str] = []
+
+
+class GitPushResult(BaseModel):
+    branch: str

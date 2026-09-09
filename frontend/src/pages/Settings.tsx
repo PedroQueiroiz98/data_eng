@@ -152,6 +152,19 @@ export function Settings() {
           .
         </p>
       </Card>
+
+      <Card className="mt-4">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-faint">
+          GitHub
+        </h2>
+        <p className="text-sm text-fg-muted">
+          Conecte sua conta do GitHub e vincule um repositório ao seu Workspace na{" "}
+          <Link to="/github" className="text-primary hover:underline">
+            Integração GitHub
+          </Link>
+          .
+        </p>
+      </Card>
     </div>
   );
 }

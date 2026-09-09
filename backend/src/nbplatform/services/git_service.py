@@ -1,12 +1,20 @@
 """Git local do Workspace: wrapper fino sobre o binário `git`.
 
-Sem remoto/GitHub nesta rodada (init/status/diff/commit/branch/checkout/log/discard).
-Lock por Workspace — nunca dois `git` concorrentes no mesmo diretório.
+init/status/diff/commit/branch/checkout/log/discard + remoto (fetch/push/pull,
+usado pela integração GitHub — ver `services/github/`). Lock por Workspace —
+nunca dois `git` concorrentes no mesmo diretório.
+
+Autenticação do remoto: o PAT NUNCA é embutido na URL do remote (ficaria
+gravado em texto claro em `.git/config`, visível via `git remote -v`). Em vez
+disso, cada chamada de rede injeta um header `Authorization` só para
+`github.com` via `-c http.https://github.com/.extraheader=...` — escopo restrito
+a esse host, nunca persiste em disco, existe só durante a chamada do subprocess.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import re
 import subprocess
@@ -18,6 +26,11 @@ from nbplatform.core.errors import ConflictError, DomainValidationError
 
 _locks: dict[str, asyncio.Lock] = {}
 _REF_OK = re.compile(r"^[A-Za-z0-9._/\-]{1,200}$")
+
+
+def _auth_header_arg(token: str) -> str:
+    basic = base64.b64encode(f"{token}:".encode()).decode()
+    return f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}"
 
 
 def _lock_for(key: str) -> asyncio.Lock:
@@ -52,6 +65,10 @@ class GitStatus:
     ahead: int = 0
     behind: int = 0
     changes: list[GitChange] = field(default_factory=list)
+    # merge em andamento (conflito de um pull/init anterior, não resolvido) e
+    # se há um remoto (`origin`) configurado.
+    merging: bool = False
+    remote_configured: bool = False
 
 
 @dataclass(slots=True)
@@ -62,19 +79,30 @@ class GitCommit:
     subject: str
 
 
+@dataclass(slots=True)
+class GitPullResult:
+    """`conflicts` vazio = merge limpo. Não vazio = merge parado no meio,
+    esperando o usuário resolver (editar + commit) ou abortar."""
+
+    conflicts: list[str] = field(default_factory=list)
+
+
 class GitService:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.timeout = get_settings().git_op_timeout_s
+        self.remote_timeout = get_settings().git_remote_op_timeout_s
 
-    async def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    async def _run(
+        self, *args: str, check: bool = True, timeout: float | None = None
+    ) -> subprocess.CompletedProcess[str]:
         def _call() -> subprocess.CompletedProcess[str]:
             return subprocess.run(  # noqa: S603 - args controlados, sem shell
                 ["git", *args],
                 cwd=str(self.root),
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                timeout=timeout if timeout is not None else self.timeout,
                 env={
                     "GIT_TERMINAL_PROMPT": "0",
                     "GIT_CONFIG_NOSYSTEM": "1",
@@ -90,6 +118,15 @@ class GitService:
         if check and proc.returncode != 0:
             raise GitError((proc.stderr or proc.stdout or "git falhou").strip())
         return proc
+
+    async def _run_authed(
+        self, token: str, *args: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """Como `_run`, mas injeta o header de auth (escopo `github.com` só) e
+        usa o timeout de operação de rede."""
+        return await self._run(
+            "-c", _auth_header_arg(token), *args, check=check, timeout=self.remote_timeout
+        )
 
     def _git_dir(self) -> Path:
         return self.root / ".git"
@@ -130,8 +167,16 @@ class GitService:
                 fields = line.split(" ", 8)
                 xy = fields[1]
                 changes.append(GitChange(path=fields[-1], index=xy[0], worktree=xy[1]))
+            elif line.startswith("u "):
+                # entrada em conflito (merge parado): "u XY N m1 m2 m3 mW h1 h2 h3 path"
+                fields = line.split(" ", 10)
+                xy = fields[1]
+                changes.append(GitChange(path=fields[-1], index=xy[0], worktree=xy[1]))
             elif line.startswith("? "):
                 changes.append(GitChange(path=line[2:], index="?", worktree="?"))
+        merging = await asyncio.to_thread((self._git_dir() / "MERGE_HEAD").exists)
+        remote_proc = await self._run("remote", check=False)
+        remote_configured = "origin" in remote_proc.stdout.split()
         return GitStatus(
             initialized=True,
             branch=branch,
@@ -139,6 +184,8 @@ class GitService:
             ahead=ahead,
             behind=behind,
             changes=changes,
+            merging=merging,
+            remote_configured=remote_configured,
         )
 
     async def diff(self, path: str | None) -> str:
@@ -219,3 +266,85 @@ class GitService:
             return None
         proc = await self._run("rev-parse", "HEAD", check=False)
         return proc.stdout.strip() or None
+
+    # ── remoto (GitHub) ───────────────────────────────────────────────────────
+    async def push(self, token: str, branch: str, name: str = "origin") -> None:
+        _validate_ref(branch)
+        async with _lock_for(str(self.root)):
+            proc = await self._run_authed(
+                token, "push", "-u", name, f"HEAD:{branch}", check=False
+            )
+            if proc.returncode != 0:
+                raise GitError((proc.stderr or proc.stdout or "push falhou").strip())
+
+    async def _conflicted_paths(self) -> list[str]:
+        proc = await self._run("status", "--porcelain=v2", check=False)
+        out: list[str] = []
+        for line in proc.stdout.splitlines():
+            if line.startswith("u "):
+                out.append(line.split(" ", 10)[-1])
+        return out
+
+    async def pull(self, token: str, branch: str, name: str = "origin") -> GitPullResult:
+        _validate_ref(branch)
+        async with _lock_for(str(self.root)):
+            await self._run_authed(token, "fetch", name, branch)
+            proc = await self._run("merge", "--no-edit", f"{name}/{branch}", check=False)
+            if proc.returncode == 0:
+                return GitPullResult()
+            conflicts = await self._conflicted_paths()
+            if conflicts:
+                return GitPullResult(conflicts=conflicts)
+            raise GitError((proc.stderr or proc.stdout or "pull falhou").strip())
+
+    async def init_from_remote(
+        self,
+        token: str,
+        url: str,
+        branch: str,
+        *,
+        author_name: str,
+        author_email: str,
+    ) -> GitPullResult:
+        """"Inicializar Repositório no Workspace": vincula o remoto e traz o
+        conteúdo inicial.
+
+        - Se o repo local só tem o commit inicial automático (nada de trabalho
+          real do usuário ainda) → adota o branch remoto direto, sem tentar
+          merge (evita ruído de "unrelated histories" no caso comum).
+        - Se já existe conteúdo real → merge com `--allow-unrelated-histories`;
+          conflitos voltam pro caller no mesmo formato do `pull` normal.
+        """
+        _validate_ref(branch)
+        await self.ensure_repo(author_name=author_name, author_email=author_email)
+        async with _lock_for(str(self.root)):
+            proc = await self._run("remote", check=False)
+            if "origin" in proc.stdout.split():
+                await self._run("remote", "set-url", "origin", url)
+            else:
+                await self._run("remote", "add", "origin", url)
+            await self._run_authed(token, "fetch", "origin", branch)
+
+            log = await self._run("log", "--oneline", check=False)
+            only_initial = len([line for line in log.stdout.splitlines() if line.strip()]) <= 1
+            if only_initial:
+                await self._run("checkout", "-B", branch, f"origin/{branch}")
+                return GitPullResult()
+
+            merge = await self._run(
+                "merge",
+                "--allow-unrelated-histories",
+                "--no-edit",
+                f"origin/{branch}",
+                check=False,
+            )
+            if merge.returncode == 0:
+                return GitPullResult()
+            conflicts = await self._conflicted_paths()
+            if conflicts:
+                return GitPullResult(conflicts=conflicts)
+            raise GitError((merge.stderr or merge.stdout or "merge falhou").strip())
+
+    async def abort_merge(self) -> None:
+        async with _lock_for(str(self.root)):
+            await self._run("merge", "--abort", check=False)

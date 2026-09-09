@@ -7,6 +7,7 @@ import {
   CollapseIcon,
   DashboardIcon,
   ExpandIcon,
+  GithubIcon,
   HistoryIcon,
   JobsIcon,
   ScheduleIcon,
@@ -31,6 +32,7 @@ const ITEMS: Item[] = [
   { label: "Agendamentos", to: "/schedules", Icon: ScheduleIcon },
   { label: "Notificações", to: "/notifications", Icon: BellIcon },
   { label: "Assistente IA", to: "/assistant", Icon: ChatIcon },
+  { label: "GitHub", to: "/github", Icon: GithubIcon },
   { label: "Variáveis", to: "/variables", Icon: VariableIcon },
   { label: "Secrets", to: "/secrets", Icon: SecretIcon },
 ];

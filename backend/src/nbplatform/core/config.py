@@ -166,6 +166,12 @@ class Settings(BaseSettings):
 
     # ─── Git local do Workspace ───
     git_op_timeout_s: float = 30.0
+    # push/pull/fetch são de rede — timeout maior que operações locais.
+    git_remote_op_timeout_s: float = 60.0
+
+    # ─── Integração GitHub (conta pessoal do usuário, PAT cifrado) ───
+    github_api_base_url: str = "https://api.github.com"
+    github_api_timeout_s: float = 15.0
 
     redis_kernel_ops: str = "nbp:kernel:ops"
     redis_kernel_sess_prefix: str = "nbp:kernel:sess:"
