@@ -6,11 +6,11 @@ as rotas respondem 200 mesmo em falha do motor, com `ok=false`.
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter
 
+from nbplatform.api.deps import CurrentUser
 from nbplatform.core.config import get_settings
 from nbplatform.schemas.lsp import (
     AutoImportRequest,
@@ -37,10 +37,12 @@ from nbplatform.services.lsp.service import LspResult, get_lsp_service
 router = APIRouter(prefix="/api/lsp", tags=["lsp"])
 
 
-def _ws_root(workspace_id: uuid.UUID | None) -> str | None:
-    if workspace_id is None:
-        return None
-    return str(Path(get_settings().workspaces_dir) / str(workspace_id))
+def _ws_root(user: CurrentUser) -> str | None:
+    """Raiz do projeto Jedi = a Home do usuário. Ignora qualquer `workspace_id`
+    vindo do cliente (isolamento por usuário). Se a Home ainda não existe em
+    disco, devolve None (Jedi trabalha só com o buffer)."""
+    root = Path(get_settings().workspace_dir) / str(user.id)
+    return str(root) if root.is_dir() else None
 
 
 @router.get("/health", response_model=LspHealthResponse)
@@ -49,9 +51,9 @@ async def lsp_health() -> LspHealthResponse:
 
 
 @router.post("/completions", response_model=CompletionResponse)
-async def completions(req: CompletionRequest) -> CompletionResponse:
+async def completions(req: CompletionRequest, user: CurrentUser) -> CompletionResponse:
     r = await get_lsp_service().complete(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
     )
     return CompletionResponse(
         ok=r.ok,
@@ -71,9 +73,9 @@ async def completions(req: CompletionRequest) -> CompletionResponse:
 
 
 @router.post("/hover", response_model=HoverResponse)
-async def hover(req: HoverRequest) -> HoverResponse:
+async def hover(req: HoverRequest, user: CurrentUser) -> HoverResponse:
     r = await get_lsp_service().hover(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
     )
     if not r.hover:
         return HoverResponse(ok=r.ok, took_ms=r.took_ms)
@@ -90,9 +92,9 @@ async def hover(req: HoverRequest) -> HoverResponse:
 
 
 @router.post("/signature", response_model=SignatureResponse)
-async def signature(req: SignatureRequest) -> SignatureResponse:
+async def signature(req: SignatureRequest, user: CurrentUser) -> SignatureResponse:
     r = await get_lsp_service().signature(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
     )
     if not r.signature:
         return SignatureResponse(ok=r.ok, took_ms=r.took_ms)
@@ -108,17 +110,17 @@ async def signature(req: SignatureRequest) -> SignatureResponse:
 
 
 @router.post("/definition", response_model=LocationsResponse)
-async def definition(req: DefinitionRequest) -> LocationsResponse:
+async def definition(req: DefinitionRequest, user: CurrentUser) -> LocationsResponse:
     r = await get_lsp_service().definition(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
     )
     return _locations(r)
 
 
 @router.post("/references", response_model=LocationsResponse)
-async def references(req: ReferencesRequest) -> LocationsResponse:
+async def references(req: ReferencesRequest, user: CurrentUser) -> LocationsResponse:
     r = await get_lsp_service().references(
-        req.cells, req.cell_index, req.line, req.column, _ws_root(req.workspace_id)
+        req.cells, req.cell_index, req.line, req.column, _ws_root(user)
     )
     return _locations(r)
 

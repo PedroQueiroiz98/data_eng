@@ -33,8 +33,16 @@ class WorkflowRepository:
         )
         return await self.session.scalar(stmt)
 
-    async def list_paged(self, *, limit: int, offset: int) -> list[Workflow]:
-        stmt = select(Workflow).order_by(Workflow.updated_at.desc()).limit(limit).offset(offset)
+    async def list_paged(
+        self, *, limit: int, offset: int, owner_id: uuid.UUID | None = None
+    ) -> list[Workflow]:
+        stmt = select(Workflow).order_by(Workflow.updated_at.desc())
+        if owner_id is not None:
+            # o dono ou legados globais (owner_id NULL)
+            stmt = stmt.where(
+                (Workflow.owner_id == owner_id) | (Workflow.owner_id.is_(None))
+            )
+        stmt = stmt.limit(limit).offset(offset)
         return list(await self.session.scalars(stmt))
 
     async def delete(self, workflow: Workflow) -> None:

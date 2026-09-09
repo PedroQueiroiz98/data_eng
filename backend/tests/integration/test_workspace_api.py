@@ -19,7 +19,8 @@ def _p(prefix: str) -> str:
 async def test_no_id_in_routes_and_meta(client) -> None:
     ws = (await client.get("/api/workspace")).json()
     assert ws["slug"] == "root"
-    assert ws["root_path"].endswith("/workspace")
+    # caminho físico por-usuário nunca é exposto — só o rótulo lógico
+    assert ws["root_path"] == "/root"
     # rota antiga com :id não existe mais
     assert (await client.get(f"/api/workspaces/{uuid.uuid4()}/tree")).status_code == 404
 
@@ -89,7 +90,8 @@ async def test_rename_propagates_to_workflow_task(client) -> None:
     assert r.status_code == 200, r.text
 
     det = (await client.get(f"/api/workflows/{wf['id']}")).json()
-    assert det["tasks"][0]["notebook_path"] == dst
+    # `notebook_path` é persistido físico-relativo (`{ownerId}/…`)
+    assert det["tasks"][0]["notebook_path"].endswith(f"/{dst}")
     assert det["status"] != "INVALID"
 
     # cleanup
@@ -155,6 +157,52 @@ async def test_internal_dir_protected(client) -> None:
     assert (
         await client.delete("/api/workspace/file", params={"path": ".workspace"})
     ).status_code == 403
+
+
+async def test_cross_user_isolation(client) -> None:
+    """B nunca enxerga/toca arquivos de A. B é um `member` recém-criado."""
+    import uuid as _uuid
+
+    # A (o `client` já está logado como admin) cria um arquivo
+    a_path = f"iso-{_uuid.uuid4().hex[:8]}.txt"
+    assert (
+        await client.put("/api/workspace/file", params={"path": a_path}, json={"text": "segredo"})
+    ).status_code == 200
+    a_id = (await client.get("/api/auth/me")).json()["id"]
+
+    email = f"iso-{_uuid.uuid4().hex[:8]}@x.com"
+    reg = await client.post(
+        "/api/auth/register",
+        json={"email": email, "name": "Iso", "password": "secret123", "role": "member"},
+    )
+    assert reg.status_code in (200, 201), reg.text
+    btok = (
+        await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
+    ).json()["access_token"]
+    bh = {"Authorization": f"Bearer {btok}"}
+
+    # B: Home vazia, não vê o arquivo de A
+    btree = (await client.get("/api/workspace/tree", headers=bh)).json()
+    assert a_path not in {c["name"] for c in (btree.get("children") or [])}
+    assert (
+        await client.get("/api/workspace/file", params={"path": a_path}, headers=bh)
+    ).status_code == 404
+    assert (
+        await client.delete("/api/workspace/file", params={"path": a_path}, headers=bh)
+    ).status_code == 404
+    assert (
+        await client.post(
+            "/api/workspace/rename", json={"from": a_path, "to": "x.txt"}, headers=bh
+        )
+    ).status_code == 404
+    # path traversal para a Home de A → 403
+    assert (
+        await client.get(
+            "/api/workspace/file", params={"path": f"../{a_id}/{a_path}"}, headers=bh
+        )
+    ).status_code == 403
+
+    await client.delete("/api/workspace/file", params={"path": a_path})
 
 
 async def test_generate_csv(client) -> None:

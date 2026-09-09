@@ -75,10 +75,11 @@ class KernelSessionManager:
             if len(self.sessions) >= self.settings.kernel_max_sessions:
                 await self._evict_idle()
 
-            # Single-workspace: raiz sempre `workspace_dir` (mostrada como /root).
-            ws_root = Path(self.settings.workspace_dir)
+            # Isolamento por usuário: raiz = Home do dono da sessão
+            # (`{workspace_dir}/{user_id}`). `notebook_path` é relativo à Home.
+            ws_root = Path(self.settings.workspace_dir) / str(meta["user_id"])
             # cwd = pasta do notebook (convenção Jupyter/Databricks: `../data/x.csv`
-            # resolve a partir de onde o notebook está). WORKSPACE_ROOT continua a raiz.
+            # resolve a partir de onde o notebook está). WORKSPACE_ROOT = a Home.
             nb_path = meta.get("notebook_path", "")
             cwd = ws_root
             if nb_path:

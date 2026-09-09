@@ -20,6 +20,10 @@ export {
   FolderPlus as FolderPlusIcon,
   File as FileIcon,
   FilePlus as FilePlusIcon,
+  FileCode2 as CodeFileIcon,
+  FileJson2 as JsonFileIcon,
+  FileSpreadsheet as SheetFileIcon,
+  Table2 as TableFileIcon,
   Upload as UploadIcon,
   GitCommitHorizontal as GitCommitIcon,
   // ações

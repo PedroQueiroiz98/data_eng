@@ -45,7 +45,8 @@ async def test_execute_workspace_notebook_end_to_end(client) -> None:
     body = r.json()
     assert body["source"] == "WORKSPACE"
     assert body["workspace_id"] == SINGLETON_WORKSPACE_ID
-    assert body["notebook_path"] == nb_path
+    # persistido físico-relativo (`{ownerId}/…`)
+    assert body["notebook_path"].endswith(f"/{nb_path}")
     assert body["notebook_version_id"] is None
     exec_id = body["id"]
 

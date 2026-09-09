@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import TriggerType
 from nbplatform.domain.schedule_spec import next_run_after
+from nbplatform.models.workflow import Workflow
 from nbplatform.repositories.schedule_repository import ScheduleRepository
 from nbplatform.services.job_orchestrator import JobOrchestrator
 
@@ -38,12 +39,14 @@ async def run_due_schedule(schedule_id: str, redis: Redis) -> uuid.UUID | None:
         parameters = dict(schedule.parameters or {})
         schedule.last_run_at = now
         schedule.next_run_at = next_run_after(schedule.cron, schedule.timezone, after=now)
+        wf = await session.get(Workflow, workflow_id)
+        owner_id = wf.owner_id if wf is not None else None
 
     try:
         job_id = await JobOrchestrator(redis).start_job(
             workflow_id,
             trigger_type=TriggerType.SCHEDULED,
-            created_by=None,
+            created_by=owner_id,  # a execução roda na Home do dono
             parameters=parameters,
         )
     except Exception:

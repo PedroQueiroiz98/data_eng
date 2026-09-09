@@ -187,15 +187,17 @@ async def kernel_ws(websocket: WebSocket, session_id: str) -> None:
 
 @router.websocket("/ws/workspace")
 async def workspace_ws(websocket: WebSocket) -> None:
-    """Eventos de filesystem do Workspace único (File Explorer em tempo real).
+    """Eventos de filesystem da Home do usuário autenticado (File Explorer em tempo real).
 
-    Snapshot = árvore atual + `seq`; depois relay dos `fs.batch` do watcher.
-    `?after_seq=` replaia o buffer Redis para não perder eventos numa reconexão.
+    Snapshot = árvore da Home + `seq`; depois relay dos `fs.batch` do watcher no
+    canal do usuário. `?after_seq=` replaia o buffer Redis numa reconexão.
     """
     await websocket.accept()
-    if not _authenticated(websocket):
+    claims = _claims(websocket)
+    if claims is None or not claims.get("sub"):
         await websocket.close(code=1008)
         return
+    user_id = str(claims["sub"])
 
     from nbplatform.core.config import get_settings as _get_settings
     from nbplatform.schemas.workspace import FileNode as _FileNode
@@ -205,8 +207,10 @@ async def workspace_ws(websocket: WebSocket) -> None:
     redis = get_redis()
     after_seq = int(websocket.query_params.get("after_seq", "0") or 0)
 
+    home = Path(settings.workspace_dir) / user_id
+    home.mkdir(parents=True, exist_ok=True)
     fs = WorkspaceFsService(
-        Path(settings.workspace_dir),
+        home,
         max_upload_bytes=settings.workspace_max_upload_bytes,
         max_nodes=settings.workspace_tree_max_nodes,
         max_depth=settings.workspace_tree_max_depth,
@@ -217,12 +221,12 @@ async def workspace_ws(websocket: WebSocket) -> None:
     except Exception:  # noqa: BLE001
         tree_json = {"name": "", "path": "", "type": "dir", "children": []}
 
-    seq_raw = await redis.get(settings.redis_workspace_seq_key)
+    seq_raw = await redis.get(settings.workspace_seq_key(user_id))
     current_seq = int(seq_raw or 0)
 
     buffered: list[dict[str, Any]] = []
     if after_seq and after_seq < current_seq:
-        for raw in await redis.lrange(settings.redis_workspace_log_key, 0, -1):
+        for raw in await redis.lrange(settings.workspace_log_key(user_id), 0, -1):
             try:
                 evt = json.loads(raw)
             except json.JSONDecodeError:
@@ -236,7 +240,7 @@ async def workspace_ws(websocket: WebSocket) -> None:
     for evt in buffered:
         await websocket.send_json(evt)
 
-    async with subscribe_workspace_events(redis) as stream:
+    async with subscribe_workspace_events(redis, user_id) as stream:
         client_gone = asyncio.create_task(_wait_client_close(websocket))
         try:
             async for event in stream:

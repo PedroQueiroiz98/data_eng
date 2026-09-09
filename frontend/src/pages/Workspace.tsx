@@ -38,19 +38,13 @@ import {
 import { EditorSurface } from "@/components/workspace/EditorSurface";
 import { EditorTabs } from "@/components/workspace/EditorTabs";
 import { ExecutionPanel } from "@/components/workspace/ExecutionPanel";
-import { FileTree } from "@/components/workspace/FileTree";
+import { WorkspaceFileBrowser } from "@/components/workspace/WorkspaceFileBrowser";
 import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { Button, Dialog, EmptyState, TextField, useConfirm, useToast } from "@/ui";
 import {
   CollapseIcon,
   ExpandIcon,
-  FilePlusIcon,
-  FolderPlusIcon,
-  NotebookIcon,
-  RefreshIcon,
-  SearchIcon,
   SpinnerIcon,
-  UploadIcon,
   WorkspaceIcon,
 } from "@/ui/icons";
 
@@ -127,9 +121,7 @@ export function Workspace() {
     setActiveTab,
     renamePrefix,
     forgetUnder,
-    toggleDir,
     setExpanded,
-    collapseAllDirs,
     markDirty,
     setExplorerWidth,
     toggleExplorer,
@@ -139,7 +131,6 @@ export function Workspace() {
     setActiveWorkspace(WS);
   }, [setActiveWorkspace]);
 
-  const expandedSet = useMemo(() => new Set(view.expandedDirs), [view.expandedDirs]);
   const openPaths = useMemo(() => view.tabs.map((t) => t.path), [view.tabs]);
   const dirtyCount = useMemo(
     () => Object.values(dirtyByPath).filter(Boolean).length,
@@ -155,7 +146,7 @@ export function Workspace() {
 
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptValue, setPromptValue] = useState("");
-  const [search, setSearch] = useState("");
+  const [currentDir, setCurrentDir] = useState("");
   const [nbDialog, setNbDialog] = useState<{ dir: string } | null>(null);
   const [palette, setPalette] = useState<"files" | "commands" | null>(null);
   const uploadTarget = useRef<string>("");
@@ -610,115 +601,42 @@ export function Workspace() {
               style={{ width: view.explorerWidth }}
             >
               <div className="flex h-9 items-center justify-between px-2 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
-                Explorer
-                <span className="flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Novo notebook na raiz"
-                    onClick={() => setNbDialog({ dir: "" })}
-                  >
-                    <NotebookIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Novo arquivo na raiz"
-                    onClick={() => onNewFile("")}
-                  >
-                    <FilePlusIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Nova pasta na raiz"
-                    onClick={() => onNewFolder("")}
-                  >
-                    <FolderPlusIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Enviar arquivo para a raiz"
-                    onClick={() => onUpload("")}
-                  >
-                    <UploadIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Recarregar árvore"
-                    onClick={() => void tree.refetch()}
-                  >
-                    <RefreshIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Recolher todas as pastas"
-                    onClick={collapseAllDirs}
-                  >
-                    <CollapseIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconBtn}
-                    title="Ocultar explorer"
-                    onClick={() => toggleExplorer(false)}
-                  >
-                    <CollapseIcon className="h-4 w-4 rotate-180" />
-                  </button>
-                </span>
+                Home
+                <button
+                  type="button"
+                  className={iconBtn}
+                  title="Ocultar explorer"
+                  onClick={() => toggleExplorer(false)}
+                >
+                  <CollapseIcon className="h-4 w-4 rotate-180" />
+                </button>
               </div>
 
-              <div className="px-2 pb-1.5">
-                <div className="flex items-center gap-1.5 rounded border border-surface-border bg-surface px-2 py-1 text-xs">
-                  <SearchIcon className="h-3.5 w-3.5 text-fg-faint" />
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Buscar arquivos…"
-                    className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg-faint"
-                  />
-                </div>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-auto">
-                {tree.isLoading ? (
-                  <div className="flex justify-center py-6 text-fg-faint">
-                    <SpinnerIcon className="h-4 w-4 animate-spin" />
-                  </div>
-                ) : tree.data ? (
-                  <FileTree
-                    root={tree.data}
-                    filter={search}
-                    openPaths={openPaths}
-                    activePath={view.activeTab}
-                    dirtyPaths={dirtyByPath}
-                    expanded={expandedSet}
-                    onToggleDir={toggleDir}
-                    onOpenFile={(path) => openTab(path)}
-                    onNewNotebook={(dir) => setNbDialog({ dir })}
-                    onNewFile={onNewFile}
-                    onNewFolder={onNewFolder}
-                    onUpload={onUpload}
-                    onGenerateCsv={onGenerateCsv}
-                    onRename={onRename}
-                    onMove={onMove}
-                    onDuplicate={onDuplicate}
-                    onDelete={onDelete}
-                    onDownload={onDownload}
-                    onCopyPath={onCopyPath}
-                    onRun={onRun}
-                    onExport={onExport}
-                    onMoveDrop={onMoveDrop}
-                  />
-                ) : (
-                  <p className="px-3 py-2 text-xs text-danger">
-                    Falha ao carregar a árvore.
-                  </p>
-                )}
-              </div>
+              <WorkspaceFileBrowser
+                root={tree.data}
+                loading={tree.isLoading}
+                currentDir={currentDir}
+                setCurrentDir={setCurrentDir}
+                openPaths={openPaths}
+                activePath={view.activeTab}
+                dirtyPaths={dirtyByPath}
+                onRefresh={() => void tree.refetch()}
+                onOpenFile={(path) => openTab(path)}
+                onNewNotebook={(dir) => setNbDialog({ dir })}
+                onNewFile={onNewFile}
+                onNewFolder={onNewFolder}
+                onUpload={onUpload}
+                onGenerateCsv={onGenerateCsv}
+                onRename={onRename}
+                onMove={onMove}
+                onDuplicate={onDuplicate}
+                onDelete={onDelete}
+                onDownload={onDownload}
+                onCopyPath={onCopyPath}
+                onRun={onRun}
+                onExport={onExport}
+                onMoveDrop={onMoveDrop}
+              />
             </aside>
             <div
               {...explorerResize.handleProps}

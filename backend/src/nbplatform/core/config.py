@@ -108,13 +108,22 @@ class Settings(BaseSettings):
     workspace_tree_max_depth: int = 12
     # Preview de dados (.csv/.parquet) no Data Viewer.
     workspace_data_max_rows: int = 500
-    # Watcher de filesystem → eventos em tempo real (canal /ws/workspace).
+    # Watcher de filesystem → eventos em tempo real (canal /ws/workspace, POR USUÁRIO).
     workspace_events_enabled: bool = True
     workspace_watch_debounce_ms: int = 200
     workspace_event_buffer: int = 2000
-    redis_workspace_event_channel: str = "nbp:events:workspace"
-    redis_workspace_seq_key: str = "nbp:workspace:seq"
-    redis_workspace_log_key: str = "nbp:workspace:log"
+    redis_workspace_event_prefix: str = "nbp:events:workspace:"
+    redis_workspace_seq_prefix: str = "nbp:workspace:seq:"
+    redis_workspace_log_prefix: str = "nbp:workspace:log:"
+
+    def workspace_event_channel(self, user_id: str) -> str:
+        return f"{self.redis_workspace_event_prefix}{user_id}"
+
+    def workspace_seq_key(self, user_id: str) -> str:
+        return f"{self.redis_workspace_seq_prefix}{user_id}"
+
+    def workspace_log_key(self, user_id: str) -> str:
+        return f"{self.redis_workspace_log_prefix}{user_id}"
 
     # ─── Kernel interativo (processo `kernel-worker`) ───
     # Interativo = kernel; produção (Jobs) continua sendo Papermill.

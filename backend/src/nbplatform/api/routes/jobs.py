@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from nbplatform.api.deps import CurrentUserId, RedisDep, SessionDep
+from nbplatform.api.deps import CurrentUser, CurrentUserId, RedisDep, SessionDep
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError
 from nbplatform.db.session import session_scope
@@ -32,8 +32,14 @@ async def run_workflow(
     payload: JobRunRequest,
     session: SessionDep,
     redis: RedisDep,
-    user_id: CurrentUserId,
+    user: CurrentUser,
 ) -> JobRead:
+    from nbplatform.services.workflow_service import WorkflowService
+
+    await WorkflowService(session).get_owned(
+        workflow_id, user_id=user.id, is_admin=user.role == "admin"
+    )
+    user_id = user.id
     job_id = await JobOrchestrator(redis).start_job(
         workflow_id,
         trigger_type=TriggerType.MANUAL,
@@ -54,13 +60,19 @@ async def run_workflow(
 @router.get("/api/jobs", response_model=list[JobRead])
 async def list_jobs(
     session: SessionDep,
+    user: CurrentUser,
     workflow_id: uuid.UUID | None = Query(default=None),
     status_filter: JobStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[JobRead]:
+    created_by = None if user.role == "admin" else user.id
     jobs = await JobService(session).list_jobs(
-        limit=limit, offset=offset, workflow_id=workflow_id, status=status_filter
+        limit=limit,
+        offset=offset,
+        workflow_id=workflow_id,
+        status=status_filter,
+        created_by=created_by,
     )
     out: list[JobRead] = []
     for j in jobs:

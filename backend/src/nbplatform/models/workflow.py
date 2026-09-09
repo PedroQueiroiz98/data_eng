@@ -16,6 +16,10 @@ class Workflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    # Dono (isolamento por usuário). NULL = legado / global (admin vê tudo).
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     status: Mapped[WorkflowStatus] = mapped_column(
         Enum(WorkflowStatus, native_enum=False, length=20),
         default=WorkflowStatus.DRAFT,

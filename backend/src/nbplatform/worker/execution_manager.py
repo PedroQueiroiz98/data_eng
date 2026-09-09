@@ -207,15 +207,15 @@ class ExecutionManager:
                 assert workspace_id is not None and notebook_path is not None, (
                     "execução WORKSPACE sem workspace_id/notebook_path"
                 )
-                # Single-workspace: a raiz é sempre `workspace_dir` (mostrada como /root).
-                root = Path(self.settings.workspace_dir)
-                content: dict[str, Any] = _read_workspace_notebook(root, notebook_path)
-                # subprocess sandbox: o filho compartilha o FS do worker, então o
-                # workspace_sdk enxerga esta raiz. No sandbox docker o volume ainda
-                # não é montado no container aninhado (pendente Fase 12).
-                workspace_root: str | None = str(root)
+                # Isolamento por usuário: `notebook_path` é físico-relativo
+                # (`{ownerId}/pasta/nb.ipynb`). A raiz global é `workspace_dir`;
+                # WORKSPACE_ROOT (visto pelo workspace_sdk) é a Home do dono.
+                global_root = Path(self.settings.workspace_dir)
+                owner_seg = notebook_path.split("/", 1)[0]
+                content: dict[str, Any] = _read_workspace_notebook(global_root, notebook_path)
+                workspace_root: str | None = str(global_root / owner_seg)
                 # cwd = pasta do notebook (Jupyter/Databricks: `../data/x.csv`).
-                nb_dir = (root / notebook_path).parent
+                nb_dir = (global_root / notebook_path).parent
                 if nb_dir.is_dir():
                     exec_cwd = str(nb_dir)
             else:

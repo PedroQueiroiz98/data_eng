@@ -37,7 +37,7 @@ async def test_save_graph_validates_workspace_notebook_and_runs(client) -> None:
     assert resp.status_code == 200, resp.text
     task = resp.json()["tasks"][0]
     assert task["workspace_id"] == ws_id
-    assert task["notebook_path"] == path
+    assert task["notebook_path"].endswith(f"/{path}")
 
     job = (await client.post(f"/api/workflows/{wf}/run", json={})).json()
     assert await drive_job(job["id"]) == "SUCCESS"
@@ -46,7 +46,7 @@ async def test_save_graph_validates_workspace_notebook_and_runs(client) -> None:
     exec_id = detail["tasks"][0]["execution_id"]
     ex = (await client.get(f"/api/executions/{exec_id}")).json()
     assert ex["source"] == "WORKSPACE"
-    assert ex["notebook_path"] == path
+    assert ex["notebook_path"].endswith(f"/{path}")
 
 
 async def test_save_graph_rejects_missing_workspace_notebook(client) -> None:

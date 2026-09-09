@@ -79,6 +79,12 @@ def _project(root: str) -> jedi.Project | None:
         return None
 
 
+def _buffer_path(workspace_root: str | None) -> str | None:
+    if workspace_root and os.path.isdir(workspace_root):
+        return os.path.join(workspace_root, "__nbp_buffer__.py")
+    return _VIRTUAL_PATH
+
+
 def _script(source: str, env_path: str, workspace_root: str | None = None) -> jedi.Script:
     if workspace_root and os.path.isdir(workspace_root):
         return jedi.Script(
@@ -190,7 +196,8 @@ def goto(
         )
     except Exception:  # noqa: BLE001
         return []
-    return [_to_location(n) for n in names]
+    buf = _buffer_path(workspace_root)
+    return [_to_location(n, buf) for n in names]
 
 
 def references(
@@ -203,12 +210,20 @@ def references(
         )
     except Exception:  # noqa: BLE001
         return []
-    return [_to_location(n) for n in names]
+    buf = _buffer_path(workspace_root)
+    return [_to_location(n, buf) for n in names]
 
 
-def _to_location(n: jedi.api.classes.Name) -> Location:
+def _to_location(n: jedi.api.classes.Name, buffer_path: str | None = None) -> Location:
     path = str(n.module_path) if n.module_path else None
-    external = path is not None
+    # Uma definição no próprio buffer (com projeto Jedi, `module_path` aponta para
+    # `<home>/__nbp_buffer__.py`) NÃO é externa — mapeia para uma célula.
+    in_buffer = (
+        path is not None
+        and buffer_path is not None
+        and os.path.abspath(path) == os.path.abspath(buffer_path)
+    )
+    external = path is not None and not in_buffer
     code = ""
     if not external:
         try:

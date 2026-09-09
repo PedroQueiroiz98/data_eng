@@ -33,19 +33,22 @@ async def publish_kernel_event(redis: Redis, session_id: str, event: dict[str, A
     await redis.publish(channel, json.dumps(event, default=str))
 
 
-async def publish_workspace_event(redis: Redis, event: dict[str, Any]) -> dict[str, Any]:
-    """Evento de filesystem do Workspace único.
+async def publish_workspace_event(
+    redis: Redis, event: dict[str, Any], *, user_id: str
+) -> dict[str, Any]:
+    """Evento de filesystem da Home de UM usuário.
 
-    Ganha um `seq` monotônico e vai para um buffer Redis (replay via `after_seq`)
-    antes do fan-out pub/sub. Espelha `KernelSessionManager._emit`.
+    Ganha um `seq` monotônico (por usuário) e vai para um buffer Redis (replay
+    via `after_seq`) antes do fan-out pub/sub. Espelha `KernelSessionManager._emit`.
     """
     settings = get_settings()
-    seq = await redis.incr(settings.redis_workspace_seq_key)
+    seq = await redis.incr(settings.workspace_seq_key(user_id))
     payload = {**event, "seq": seq}
     raw = json.dumps(payload, default=str)
-    await redis.rpush(settings.redis_workspace_log_key, raw)
-    await redis.ltrim(settings.redis_workspace_log_key, -settings.workspace_event_buffer, -1)
-    await redis.publish(settings.redis_workspace_event_channel, raw)
+    log_key = settings.workspace_log_key(user_id)
+    await redis.rpush(log_key, raw)
+    await redis.ltrim(log_key, -settings.workspace_event_buffer, -1)
+    await redis.publish(settings.workspace_event_channel(user_id), raw)
     return payload
 
 
@@ -88,5 +91,5 @@ def subscribe_kernel_events(redis: Redis, session_id: str) -> _Sub:
     return subscribe_channel(redis, get_settings().kernel_event_channel(session_id))
 
 
-def subscribe_workspace_events(redis: Redis) -> _Sub:
-    return subscribe_channel(redis, get_settings().redis_workspace_event_channel)
+def subscribe_workspace_events(redis: Redis, user_id: str) -> _Sub:
+    return subscribe_channel(redis, get_settings().workspace_event_channel(user_id))

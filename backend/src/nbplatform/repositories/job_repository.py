@@ -38,12 +38,15 @@ class JobRepository:
         offset: int,
         workflow_id: uuid.UUID | None = None,
         status: JobStatus | None = None,
+        created_by: uuid.UUID | None = None,
     ) -> list[Job]:
         stmt = select(Job).order_by(Job.created_at.desc()).options(selectinload(Job.tasks))
         if workflow_id is not None:
             stmt = stmt.where(Job.workflow_id == workflow_id)
         if status is not None:
             stmt = stmt.where(Job.status == status)
+        if created_by is not None:
+            stmt = stmt.where(Job.created_by == created_by)
         stmt = stmt.limit(limit).offset(offset)
         return list(await self.session.scalars(stmt))
 

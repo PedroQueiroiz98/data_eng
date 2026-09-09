@@ -1,8 +1,10 @@
-"""Endpoints do Workspace **único** (`/root`): File Explorer + execução.
+"""Endpoints da **Home do usuário** (`/root`): File Explorer + execução.
 
-Modo single-workspace: não há CRUD de Workspace nem ACL de membros. Qualquer
-usuário autenticado é EDITOR do Workspace `/root` (admin global é OWNER).
-Todas as rotas operam sobre `settings.workspace_dir` (mostrado como `/root`).
+Modo single-workspace com isolamento por usuário: cada usuário autenticado tem
+sua Home física em `{settings.workspace_dir}/{user.id}/…`. Todo caminho é
+resolvido dentro dessa Home (`resolve_within`) — nenhum usuário enxerga ou toca
+arquivos de outro. O frontend nunca vê o segmento `{user.id}`: para ele a raiz é
+`/root` / `Home`.
 """
 
 from __future__ import annotations
@@ -53,6 +55,16 @@ logger = logging.getLogger("nbplatform.workspace.fs")
 _WID = SINGLETON_WORKSPACE_ID
 
 
+def user_home_dir(user_id: uuid.UUID) -> Path:
+    """Diretório físico da Home de um usuário: `{workspace_dir}/{user_id}`."""
+    return Path(get_settings().workspace_dir) / str(user_id)
+
+
+def physical_path(user_id: uuid.UUID, home_rel: str) -> str:
+    """Caminho relativo à raiz global (`{user_id}/…`) — o que vai para o worker/DB."""
+    return f"{user_id}/{home_rel.lstrip('/')}"
+
+
 def _log_op(
     operation: str,
     *,
@@ -60,7 +72,6 @@ def _log_op(
     status_: str = "SUCCESS",
     **paths: str | None,
 ) -> None:
-    """Log estruturado de operação de arquivo do Workspace."""
     logger.info(
         "workspace file operation",
         extra={
@@ -73,10 +84,13 @@ def _log_op(
     )
 
 
-def _fs() -> WorkspaceFsService:
+def _fs(user_id: uuid.UUID) -> WorkspaceFsService:
     settings = get_settings()
+    root = user_home_dir(user_id)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".workspace").mkdir(parents=True, exist_ok=True)
     return WorkspaceFsService(
-        Path(settings.workspace_dir),
+        root,
         max_upload_bytes=settings.workspace_max_upload_bytes,
         max_nodes=settings.workspace_tree_max_nodes,
         max_depth=settings.workspace_tree_max_depth,
@@ -95,30 +109,32 @@ async def _audit(
     )
 
 
-# ── Workspace (metadados do singleton) ─────────────────────────────────────
+# ── Workspace (metadados lógicos) ─────────────────────────────────────────
 @router.get("", response_model=WorkspaceDetail)
 async def get_workspace(session: SessionDep, _access: WorkspaceViewer) -> WorkspaceDetail:
     workspace = await WorkspaceService(session).get_singleton()
-    return WorkspaceDetail.model_validate(workspace)
+    detail = WorkspaceDetail.model_validate(workspace)
+    detail.root_path = "/root"  # nunca expor o caminho físico por-usuário
+    return detail
 
 
 # ── File Explorer ──────────────────────────────────────────────────────────
 @router.get("/tree", response_model=FileNode)
 async def get_tree(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str = Query(default=""),
     depth: int | None = Query(default=None, ge=1, le=64),
 ) -> FileNode:
-    tree = await _fs().list_tree(rel_path=path, depth=depth)
+    tree = await _fs(access.user.id).list_tree(rel_path=path, depth=depth)
     return FileNode.model_validate(tree, from_attributes=True)
 
 
 @router.get("/file", response_model=FileContentRead)
 async def read_file(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str = Query(min_length=1),
 ) -> FileContentRead:
-    content = await _fs().read_file(path)
+    content = await _fs(access.user.id).read_file(path)
     return FileContentRead.model_validate(content, from_attributes=True)
 
 
@@ -130,7 +146,7 @@ async def write_file(
     path: str = Query(min_length=1),
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> FileContentRead:
-    content = await _fs().write_file(
+    content = await _fs(access.user.id).write_file(
         path, text=payload.text, notebook=payload.notebook, if_match=if_match
     )
     await _audit(session, access.user.id, "WORKSPACE_FS_WRITE", path=path)
@@ -150,12 +166,12 @@ _READ_EXAMPLE = {
 
 @router.get("/file/paths", response_model=FilePathsRead)
 async def file_paths(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str = Query(min_length=1),
     from_path: str | None = Query(default=None),
 ) -> FilePathsRead:
     """Caminhos canônicos de um arquivo (para Copy Path / Copy Read Example)."""
-    content = await _fs().read_file(path)  # 404 se não existir
+    content = await _fs(access.user.id).read_file(path)  # 404 se não existir
     rel = content.path
     ext = ("." + rel.rsplit(".", 1)[-1].lower()) if "." in rel else ""
     example_target = rel
@@ -176,24 +192,24 @@ async def file_paths(
 
 @router.get("/data", response_model=DataPreviewRead)
 async def read_data(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str = Query(min_length=1),
     offset: int = Query(default=0, ge=0),
     limit: int | None = Query(default=None, ge=1),
 ) -> DataPreviewRead:
     settings = get_settings()
     capped = min(limit or 100, settings.workspace_data_max_rows)
-    preview = await _fs().read_data(path, offset=offset, limit=capped)
+    preview = await _fs(access.user.id).read_data(path, offset=offset, limit=capped)
     return DataPreviewRead.model_validate(preview, from_attributes=True)
 
 
 @router.get("/export")
 async def export_notebook(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str = Query(min_length=1),
     fmt: str = Query(default="ipynb", pattern="^(ipynb|py)$"),
 ) -> Response:
-    data, filename, media_type = await _fs().export_notebook(path, fmt)
+    data, filename, media_type = await _fs(access.user.id).export_notebook(path, fmt)
     return Response(
         content=data,
         media_type=media_type,
@@ -207,7 +223,7 @@ async def make_dir(
     access: WorkspaceEditor,
     path: str = Query(min_length=1),
 ) -> FileNode:
-    node = await _fs().make_dir(path)
+    node = await _fs(access.user.id).make_dir(path)
     await _audit(session, access.user.id, "WORKSPACE_FS_MKDIR", path=path)
     _log_op("CREATE_FOLDER", user_id=access.user.id, path=path)
     return FileNode.model_validate(node, from_attributes=True)
@@ -220,10 +236,10 @@ async def delete_entry(
     path: str = Query(min_length=1),
     recursive: bool = Query(default=False),
 ) -> None:
-    await _fs().delete(path, recursive=recursive)
-    # Workflows que referenciam este notebook (ou algo sob esta pasta) ficam
-    # inválidos — o usuário decide localizar/remover a etapa.
-    await WorkflowService(session).invalidate_referencing(path)
+    await _fs(access.user.id).delete(path, recursive=recursive)
+    await WorkflowService(session).invalidate_referencing(
+        physical_path(access.user.id, path), owner_id=access.user.id
+    )
     await _audit(session, access.user.id, "WORKSPACE_FS_DELETE", path=path)
     _log_op("DELETE", user_id=access.user.id, path=path)
 
@@ -234,9 +250,12 @@ async def rename_entry(
     session: SessionDep,
     access: WorkspaceEditor,
 ) -> FileNode:
-    node = await _fs().rename(payload.src, payload.dst)
-    # Referências de Workflow acompanham o rename/move (ID estável via path fixup).
-    repathed = await WorkflowService(session).repath_tasks(payload.src, payload.dst)
+    node = await _fs(access.user.id).rename(payload.src, payload.dst)
+    repathed = await WorkflowService(session).repath_tasks(
+        physical_path(access.user.id, payload.src),
+        physical_path(access.user.id, payload.dst),
+        owner_id=access.user.id,
+    )
     await _audit(
         session, access.user.id, "WORKSPACE_FS_RENAME", src=payload.src, dst=payload.dst
     )
@@ -256,7 +275,7 @@ async def copy_entry(
     session: SessionDep,
     access: WorkspaceEditor,
 ) -> FileNode:
-    node = await _fs().copy(payload.src, payload.dst)
+    node = await _fs(access.user.id).copy(payload.src, payload.dst)
     await _audit(
         session, access.user.id, "WORKSPACE_FS_COPY", src=payload.src, dst=payload.dst
     )
@@ -271,7 +290,7 @@ async def upload_file(
     file: UploadFile = File(...),
     path: str = Query(default=""),
 ) -> FileNode:
-    node = await _fs().save_upload(path, file.filename or "arquivo", file)
+    node = await _fs(access.user.id).save_upload(path, file.filename or "arquivo", file)
     await _audit(session, access.user.id, "WORKSPACE_FS_UPLOAD", path=node.path)
     _log_op("UPLOAD", user_id=access.user.id, path=node.path)
     return FileNode.model_validate(node, from_attributes=True)
@@ -284,7 +303,9 @@ async def generate_file(
     access: WorkspaceEditor,
 ) -> FileNode:
     """Gera um arquivo sintético grande (ex.: CSV de 1.000.000 de linhas)."""
-    node = await _fs().generate_csv(payload.path, rows=payload.rows, seed=payload.seed)
+    node = await _fs(access.user.id).generate_csv(
+        payload.path, rows=payload.rows, seed=payload.seed
+    )
     await _audit(
         session, access.user.id, "WORKSPACE_FS_GENERATE", path=payload.path, rows=payload.rows
     )
@@ -299,15 +320,15 @@ async def execute_workspace_notebook(
     redis: RedisDep,
     access: WorkspaceEditor,
 ) -> ExecutionRead:
-    """Executa um `.ipynb` do Workspace via Papermill (source=WORKSPACE)."""
+    """Executa um `.ipynb` da Home do usuário via Papermill (source=WORKSPACE)."""
     if not is_ipynb(payload.notebook_path):
         raise DomainValidationError("Só é possível executar arquivos .ipynb.")
-    await _fs().read_file(payload.notebook_path)  # 404 se não existir
+    await _fs(access.user.id).read_file(payload.notebook_path)  # 404 se não existir
 
     exec_service = ExecutionService(session)
     execution, created = await exec_service.create_for_workspace(
         _WID,
-        payload.notebook_path,
+        physical_path(access.user.id, payload.notebook_path),
         parameters=payload.parameters,
         idempotency_key=payload.idempotency_key,
     )
@@ -323,10 +344,10 @@ async def execute_workspace_notebook(
 
 @router.get("/download")
 async def download(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str = Query(min_length=1),
 ) -> Response:
-    source, name, is_zip = await _fs().open_download(path)
+    source, name, is_zip = await _fs(access.user.id).open_download(path)
     media = "application/zip" if is_zip else "application/octet-stream"
     headers = {"Content-Disposition": f'attachment; filename="{name}"'}
 

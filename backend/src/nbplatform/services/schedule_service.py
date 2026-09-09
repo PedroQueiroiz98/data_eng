@@ -53,8 +53,10 @@ class ScheduleService:
             raise NotFoundError(f"Schedule {schedule_id} não encontrado.")
         return schedule
 
-    async def list_schedules(self, *, workflow_id: uuid.UUID | None) -> list[Schedule]:
-        return await self.repo.list_all(workflow_id=workflow_id)
+    async def list_schedules(
+        self, *, workflow_id: uuid.UUID | None, owner_id: uuid.UUID | None = None
+    ) -> list[Schedule]:
+        return await self.repo.list_all(workflow_id=workflow_id, owner_id=owner_id)
 
     async def update(
         self,

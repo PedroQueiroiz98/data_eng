@@ -32,8 +32,8 @@ router = APIRouter(prefix="/api/workspace/git", tags=["git"])
 _WID = SINGLETON_WORKSPACE_ID
 
 
-def _svc() -> GitService:
-    return GitService(Path(get_settings().workspace_dir))
+def _svc(user_id: uuid.UUID) -> GitService:
+    return GitService(Path(get_settings().workspace_dir) / str(user_id))
 
 
 async def _audit(
@@ -49,39 +49,39 @@ async def _audit(
 
 
 @router.get("/status", response_model=GitStatusRead)
-async def git_status(_access: WorkspaceViewer) -> GitStatusRead:
-    result = await _svc().status()
+async def git_status(access: WorkspaceViewer) -> GitStatusRead:
+    result = await _svc(access.user.id).status()
     return GitStatusRead.model_validate(result, from_attributes=True)
 
 
 @router.get("/diff", response_model=GitDiffRead)
 async def git_diff(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     path: str | None = Query(default=None),
 ) -> GitDiffRead:
-    diff = await _svc().diff(path)
+    diff = await _svc(access.user.id).diff(path)
     return GitDiffRead(path=path, diff=diff)
 
 
 @router.get("/log", response_model=list[GitCommitRead])
 async def git_log(
-    _access: WorkspaceViewer,
+    access: WorkspaceViewer,
     limit: int = Query(default=50, ge=1, le=500),
 ) -> list[GitCommitRead]:
-    commits = await _svc().log(limit)
+    commits = await _svc(access.user.id).log(limit)
     return [GitCommitRead.model_validate(c, from_attributes=True) for c in commits]
 
 
 @router.get("/branches", response_model=GitBranchesRead)
-async def git_branches(_access: WorkspaceViewer) -> GitBranchesRead:
-    svc = _svc()
+async def git_branches(access: WorkspaceViewer) -> GitBranchesRead:
+    svc = _svc(access.user.id)
     st = await svc.status()
     return GitBranchesRead(current=st.branch, branches=await svc.branches())
 
 
 @router.post("/init", response_model=GitStatusRead, status_code=status.HTTP_201_CREATED)
 async def git_init(session: SessionDep, access: WorkspaceEditor) -> GitStatusRead:
-    svc = _svc()
+    svc = _svc(access.user.id)
     await svc.ensure_repo(
         author_name=access.user.name or "",
         author_email=access.user.email or "",
@@ -96,7 +96,7 @@ async def git_create_branch(
     session: SessionDep,
     access: WorkspaceEditor,
 ) -> dict[str, str]:
-    await _svc().create_branch(payload.name)
+    await _svc(access.user.id).create_branch(payload.name)
     await _audit(session, access.user.id, "WORKSPACE_GIT_BRANCH", name=payload.name)
     return {"branch": payload.name}
 
@@ -107,7 +107,7 @@ async def git_checkout(
     session: SessionDep,
     access: WorkspaceEditor,
 ) -> dict[str, str]:
-    await _svc().checkout(payload.ref)
+    await _svc(access.user.id).checkout(payload.ref)
     await _audit(session, access.user.id, "WORKSPACE_GIT_CHECKOUT", ref=payload.ref)
     return {"ref": payload.ref}
 
@@ -118,7 +118,7 @@ async def git_commit(
     session: SessionDep,
     access: WorkspaceEditor,
 ) -> GitCommitResult:
-    sha = await _svc().commit(
+    sha = await _svc(access.user.id).commit(
         paths=payload.paths,
         message=payload.message,
         author_name=access.user.name or "",
@@ -134,6 +134,6 @@ async def git_discard(
     session: SessionDep,
     access: WorkspaceEditor,
 ) -> dict[str, int]:
-    await _svc().discard(payload.paths)
+    await _svc(access.user.id).discard(payload.paths)
     await _audit(session, access.user.id, "WORKSPACE_GIT_DISCARD", count=len(payload.paths))
     return {"discarded": len(payload.paths)}

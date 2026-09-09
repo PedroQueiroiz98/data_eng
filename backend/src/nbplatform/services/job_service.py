@@ -88,9 +88,14 @@ class JobService:
         offset: int,
         workflow_id: uuid.UUID | None,
         status: JobStatus | None,
+        created_by: uuid.UUID | None = None,
     ) -> list[Job]:
         return await self.repo.list_paged(
-            limit=limit, offset=offset, workflow_id=workflow_id, status=status
+            limit=limit,
+            offset=offset,
+            workflow_id=workflow_id,
+            status=status,
+            created_by=created_by,
         )
 
     async def logs_since(self, job_id: uuid.UUID, *, after_seq: int) -> list[JobLog]:

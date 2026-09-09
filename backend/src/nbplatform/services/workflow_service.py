@@ -10,7 +10,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nbplatform.core.config import get_settings
-from nbplatform.core.errors import ConflictError, DomainValidationError, NotFoundError
+from nbplatform.core.errors import (
+    ConflictError,
+    DomainValidationError,
+    ForbiddenError,
+    NotFoundError,
+)
 from nbplatform.domain.dag import validate_dag
 from nbplatform.domain.enums import TaskType, WorkflowStatus
 from nbplatform.domain.workspace_paths import is_ipynb
@@ -23,12 +28,18 @@ from nbplatform.services.workspace_fs_service import WorkspaceFsService
 from nbplatform.services.workspace_service import SINGLETON_WORKSPACE_ID
 
 
-def _workspace_fs() -> WorkspaceFsService:
-    settings = get_settings()
+def _workspace_fs(user_id: uuid.UUID | str | None = None) -> WorkspaceFsService:
+    """FS handle. `user_id` → enraizado na Home do usuário; senão na raiz global
+    (usado quando o caminho já é físico-relativo `{ownerId}/…`)."""
     from pathlib import Path
 
+    settings = get_settings()
+    root = Path(settings.workspace_dir)
+    if user_id is not None:
+        root = root / str(user_id)
+        root.mkdir(parents=True, exist_ok=True)
     return WorkspaceFsService(
-        Path(settings.workspace_dir),
+        root,
         max_upload_bytes=settings.workspace_max_upload_bytes,
         max_nodes=settings.workspace_tree_max_nodes,
         max_depth=settings.workspace_tree_max_depth,
@@ -41,8 +52,12 @@ class WorkflowService:
         self.repo = WorkflowRepository(session)
 
     # ── CRUD ────────────────────────────────────────────────────────────────
-    async def create(self, *, name: str, description: str | None) -> Workflow:
-        workflow = Workflow(name=name, description=description, status=WorkflowStatus.DRAFT)
+    async def create(
+        self, *, name: str, description: str | None, owner_id: uuid.UUID | None = None
+    ) -> Workflow:
+        workflow = Workflow(
+            name=name, description=description, status=WorkflowStatus.DRAFT, owner_id=owner_id
+        )
         await self.repo.add(workflow)
         return workflow
 
@@ -52,8 +67,17 @@ class WorkflowService:
             raise NotFoundError(f"Workflow {workflow_id} não encontrado.")
         return workflow
 
-    async def list_workflows(self, *, limit: int, offset: int) -> list[Workflow]:
-        return await self.repo.list_paged(limit=limit, offset=offset)
+    async def get_owned(
+        self, workflow_id: uuid.UUID, *, user_id: uuid.UUID, is_admin: bool
+    ) -> Workflow:
+        workflow = await self.get(workflow_id)
+        _assert_owner(workflow, user_id=user_id, is_admin=is_admin)
+        return workflow
+
+    async def list_workflows(
+        self, *, limit: int, offset: int, owner_id: uuid.UUID | None = None
+    ) -> list[Workflow]:
+        return await self.repo.list_paged(limit=limit, offset=offset, owner_id=owner_id)
 
     async def update_metadata(
         self,
@@ -94,17 +118,22 @@ class WorkflowService:
         *,
         tasks: list[WorkflowTaskInput],
         dependencies: list[WorkflowEdgeInput],
+        owner_id: uuid.UUID,
+        is_admin: bool = False,
     ) -> Workflow:
         workflow = await self.repo.get(workflow_id)
         if workflow is None:
             raise NotFoundError(f"Workflow {workflow_id} não encontrado.")
+        _assert_owner(workflow, user_id=owner_id, is_admin=is_admin)
+        # o dono efetivo (para resolver a Home dos notebooks) é o do workflow
+        effective_owner = workflow.owner_id or owner_id
 
         keys = [t.key for t in tasks]
         if len(keys) != len(set(keys)):
             raise DomainValidationError("Chaves de tarefa duplicadas no grafo.")
         key_set = set(keys)
 
-        await self._validate_task_types(tasks)
+        await self._validate_task_types(tasks, effective_owner)
 
         edge_keys = [(e.from_key, e.to_key) for e in dependencies]
         for src, dst in edge_keys:
@@ -113,7 +142,7 @@ class WorkflowService:
         validate_dag(key_set, edge_keys)
 
         existing = {t.id: t for t in await self.repo.tasks_for(workflow_id)}
-        key_to_id = await self._upsert_tasks(workflow_id, tasks, existing)
+        key_to_id = await self._upsert_tasks(workflow_id, tasks, existing, effective_owner)
 
         orphan_ids = set(existing) - set(key_to_id.values())
         for oid in orphan_ids:
@@ -151,7 +180,9 @@ class WorkflowService:
         return await self.get(workflow_id)
 
     # ── helpers ────────────────────────────────────────────────────────────
-    async def _validate_task_types(self, tasks: list[WorkflowTaskInput]) -> None:
+    async def _validate_task_types(
+        self, tasks: list[WorkflowTaskInput], owner_id: uuid.UUID
+    ) -> None:
         legacy_notebook_ids: set[uuid.UUID] = set()
         for task in tasks:
             if task.type is not TaskType.NOTEBOOK:
@@ -159,7 +190,9 @@ class WorkflowService:
                     f"Tipo de tarefa não suportado nesta fase: {task.type}."
                 )
             if task.notebook_path:
-                await self._validate_workspace_notebook(task.name, task.notebook_path)
+                await self._validate_workspace_notebook(
+                    task.name, _home_rel(task.notebook_path, owner_id), owner_id
+                )
             elif task.notebook_id is not None:
                 legacy_notebook_ids.add(task.notebook_id)  # workflow antigo
             else:
@@ -180,30 +213,34 @@ class WorkflowService:
                     f"Notebook(s) inexistente(s): {sorted(str(m) for m in missing)}."
                 )
 
-    async def _validate_workspace_notebook(self, task_name: str, notebook_path: str) -> None:
-        if not is_ipynb(notebook_path):
+    async def _validate_workspace_notebook(
+        self, task_name: str, home_rel_path: str, owner_id: uuid.UUID
+    ) -> None:
+        if not is_ipynb(home_rel_path):
             raise DomainValidationError(
                 f"Tarefa '{task_name}': o caminho deve apontar para um .ipynb."
             )
         try:
-            await _workspace_fs().read_file(notebook_path)
+            await _workspace_fs(owner_id).read_file(home_rel_path)
         except NotFoundError as exc:
             raise DomainValidationError(
-                f"Tarefa '{task_name}': notebook não encontrado em /root ({notebook_path})."
+                f"Tarefa '{task_name}': notebook não encontrado em /root ({home_rel_path})."
             ) from exc
 
     # ── integridade de referências (rename/move/delete de notebook) ─────────
-    async def repath_tasks(self, old: str, new: str) -> int:
-        """Reescreve `notebook_path` das tasks afetadas por um rename/move.
+    async def repath_tasks(self, old: str, new: str, *, owner_id: uuid.UUID) -> int:
+        """Reescreve `notebook_path` (físico-relativo) das tasks do usuário afetadas
+        por um rename/move. `old`/`new` já vêm prefixados com `{owner_id}/`.
 
-        Cobre o caminho exato e tudo sob ele (rename de pasta). Retorna quantas
-        linhas mudaram. Se um Workflow inválido voltar a ter todos os caminhos
-        resolvíveis, ele volta a DRAFT.
+        Cobre o caminho exato e tudo sob ele (rename de pasta). Se um Workflow
+        inválido voltar a ter todos os caminhos resolvíveis, volta a DRAFT.
         """
         rows = list(
             await self.session.scalars(
-                select(WorkflowTask).where(
-                    WorkflowTask.workspace_id == SINGLETON_WORKSPACE_ID,
+                select(WorkflowTask)
+                .join(Workflow, Workflow.id == WorkflowTask.workflow_id)
+                .where(
+                    Workflow.owner_id == owner_id,
                     WorkflowTask.notebook_path.is_not(None),
                 )
             )
@@ -226,12 +263,15 @@ class WorkflowService:
                 await self._revalidate_workflow(wf_id)
         return changed
 
-    async def invalidate_referencing(self, path: str) -> int:
-        """Marca como INVALID os Workflows cujas tasks apontam para `path` (ou sob ele)."""
+    async def invalidate_referencing(self, path: str, *, owner_id: uuid.UUID) -> int:
+        """Marca como INVALID os Workflows do usuário cujas tasks apontam para
+        `path` (físico-relativo `{owner_id}/…`) ou algo sob ele."""
         rows = list(
             await self.session.scalars(
-                select(WorkflowTask).where(
-                    WorkflowTask.workspace_id == SINGLETON_WORKSPACE_ID,
+                select(WorkflowTask)
+                .join(Workflow, Workflow.id == WorkflowTask.workflow_id)
+                .where(
+                    Workflow.owner_id == owner_id,
                     WorkflowTask.notebook_path.is_not(None),
                 )
             )
@@ -256,7 +296,7 @@ class WorkflowService:
         wf = await self.repo.get(workflow_id)
         if wf is None or wf.status != WorkflowStatus.INVALID:
             return
-        fs = _workspace_fs()
+        fs = _workspace_fs()  # raiz global — `notebook_path` já é físico-relativo
         for row in await self.repo.tasks_for(workflow_id):
             if not row.notebook_path:
                 continue
@@ -272,6 +312,7 @@ class WorkflowService:
         workflow_id: uuid.UUID,
         tasks: list[WorkflowTaskInput],
         existing: dict[uuid.UUID, WorkflowTask],
+        owner_id: uuid.UUID,
     ) -> dict[str, uuid.UUID]:
         key_to_id: dict[str, uuid.UUID] = {}
         for task in tasks:
@@ -280,7 +321,7 @@ class WorkflowService:
             if row is None:
                 row = WorkflowTask(workflow_id=workflow_id)
                 self.session.add(row)
-            _apply(row, task)
+            _apply(row, task, owner_id)
             await self.session.flush()
             key_to_id[task.key] = row.id
         return key_to_id
@@ -293,13 +334,33 @@ def _maybe_uuid(value: str) -> uuid.UUID | None:
         return None
 
 
-def _apply(row: WorkflowTask, task: WorkflowTaskInput) -> None:
+def _home_rel(notebook_path: str, owner_id: uuid.UUID) -> str:
+    """Tira o prefixo `{owner_id}/` se já estiver físico-relativo."""
+    prefix = f"{owner_id}/"
+    return notebook_path[len(prefix) :] if notebook_path.startswith(prefix) else notebook_path
+
+
+def _physical(notebook_path: str, owner_id: uuid.UUID) -> str:
+    """Garante o prefixo `{owner_id}/` (físico-relativo, o que vai para o DB)."""
+    prefix = f"{owner_id}/"
+    return notebook_path if notebook_path.startswith(prefix) else f"{prefix}{notebook_path}"
+
+
+def _assert_owner(workflow: Workflow, *, user_id: uuid.UUID, is_admin: bool) -> None:
+    if is_admin:
+        return
+    if workflow.owner_id is not None and workflow.owner_id != user_id:
+        raise ForbiddenError("Workflow de outro usuário.")
+
+
+def _apply(row: WorkflowTask, task: WorkflowTaskInput, owner_id: uuid.UUID) -> None:
     row.name = task.name
     row.type = task.type
     row.notebook_id = task.notebook_id
-    # Single-workspace: uma task com `notebook_path` sempre aponta para `/root`.
+    # Isolamento por usuário: `notebook_path` persiste físico-relativo
+    # (`{owner_id}/pasta/nb.ipynb`); o worker resolve contra a raiz global.
     row.workspace_id = SINGLETON_WORKSPACE_ID if task.notebook_path else task.workspace_id
-    row.notebook_path = task.notebook_path
+    row.notebook_path = _physical(task.notebook_path, owner_id) if task.notebook_path else None
     row.parameters = task.parameters
     row.timeout_s = task.timeout_s
     row.max_retries = task.max_retries

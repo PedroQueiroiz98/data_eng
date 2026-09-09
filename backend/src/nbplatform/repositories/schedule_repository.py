@@ -25,10 +25,21 @@ class ScheduleRepository:
         stmt = select(Schedule).where(Schedule.id == schedule_id).with_for_update()
         return await self.session.scalar(stmt)
 
-    async def list_all(self, *, workflow_id: uuid.UUID | None = None) -> list[Schedule]:
+    async def list_all(
+        self,
+        *,
+        workflow_id: uuid.UUID | None = None,
+        owner_id: uuid.UUID | None = None,
+    ) -> list[Schedule]:
         stmt = select(Schedule).order_by(Schedule.created_at.desc())
         if workflow_id is not None:
             stmt = stmt.where(Schedule.workflow_id == workflow_id)
+        if owner_id is not None:
+            from nbplatform.models.workflow import Workflow
+
+            stmt = stmt.join(Workflow, Workflow.id == Schedule.workflow_id).where(
+                (Workflow.owner_id == owner_id) | (Workflow.owner_id.is_(None))
+            )
         return list(await self.session.scalars(stmt))
 
     async def list_enabled(self) -> list[Schedule]:
