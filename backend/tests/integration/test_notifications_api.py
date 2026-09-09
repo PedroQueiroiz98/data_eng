@@ -110,8 +110,8 @@ async def test_update_replaces_secret_when_new_value(client) -> None:
     )
     async with session_scope() as session:
         row = await session.get(NotificationProvider, uuid.UUID(p["id"]))
-        from nbplatform.core.crypto import SecretCipher
         from nbplatform.core.config import get_settings
+        from nbplatform.core.crypto import SecretCipher
 
         assert row is not None
         assert SecretCipher(get_settings().secret_encryption_key).decrypt(
@@ -229,8 +229,9 @@ async def test_reprocessing_same_event_is_idempotent(client) -> None:
     job_id = await _run_failing(client, "wf-idem")
     n1 = len((await client.get(f"/api/notifications/deliveries?job={job_id}")).json()["items"])
 
-    from nbplatform.domain.notifications import NotificationEvent, NotificationEventType
     from datetime import UTC, datetime
+
+    from nbplatform.domain.notifications import NotificationEvent, NotificationEventType
 
     await NotificationService(get_redis()).notify(
         NotificationEvent(

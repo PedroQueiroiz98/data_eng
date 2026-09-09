@@ -14,10 +14,9 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nbplatform.db.session import session_scope
-from nbplatform.domain.enums import WORKSPACE_ROLE_RANK, WorkspaceRole
+from nbplatform.domain.enums import WorkspaceRole
 from nbplatform.models.user import User
 from nbplatform.queue.redis_client import get_redis
-from nbplatform.repositories.workspace_repository import WorkspaceRepository
 from nbplatform.services.auth_service import AuthError, AuthService, ForbiddenError
 
 
@@ -90,20 +89,17 @@ class WorkspaceAccess:
 def require_workspace_role(
     minimum: WorkspaceRole,
 ) -> Callable[..., Awaitable[WorkspaceAccess]]:
-    """Dependency que exige papel >= `minimum` no Workspace da rota (path `workspace_id`).
+    """Dependency de ACL do Workspace **único**.
 
-    Admin global tem bypass (papel efetivo OWNER). Não-membro → 403.
+    Modo single-workspace: qualquer usuário autenticado tem acesso de EDITOR ao
+    Workspace `/root`; admin global é OWNER. Não há mais tabela de membros.
+    O parâmetro `minimum` é mantido só para compat de assinatura das rotas.
     """
 
-    async def _dep(
-        workspace_id: uuid.UUID, user: CurrentUser, session: SessionDep
-    ) -> WorkspaceAccess:
+    async def _dep(user: CurrentUser) -> WorkspaceAccess:
         if user.role == "admin":
             return WorkspaceAccess(user=user, role=WorkspaceRole.OWNER, is_admin=True)
-        member = await WorkspaceRepository(session).get_member(workspace_id, user.id)
-        if member is None or (WORKSPACE_ROLE_RANK[member.role] < WORKSPACE_ROLE_RANK[minimum]):
-            raise ForbiddenError("Sem permissão neste Workspace.")
-        return WorkspaceAccess(user=user, role=member.role, is_admin=False)
+        return WorkspaceAccess(user=user, role=WorkspaceRole.EDITOR, is_admin=False)
 
     return _dep
 

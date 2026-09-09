@@ -1,6 +1,11 @@
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
 
-export type WorkflowStatus = "DRAFT" | "ACTIVE" | "DISABLED" | "ARCHIVED";
+export type WorkflowStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "DISABLED"
+  | "ARCHIVED"
+  | "INVALID";
 export type TaskType = "NOTEBOOK" | "PYTHON";
 
 export interface Workflow {
@@ -111,8 +116,10 @@ export function buildGraphPayload(
       key: n.id,
       name: n.data.name,
       type: "NOTEBOOK",
-      notebook_id: n.data.workspaceId ? null : n.data.notebookId,
-      workspace_id: n.data.workspaceId ?? null,
+      // Workspace único: o backend deriva o workspace_id de `/root` quando há
+      // notebook_path. Nunca enviamos o sentinel "root" (não é UUID).
+      notebook_id: n.data.notebookPath ? null : n.data.notebookId,
+      workspace_id: null,
       notebook_path: n.data.notebookPath ?? null,
       timeout_s: n.data.timeoutS,
       max_retries: n.data.maxRetries,

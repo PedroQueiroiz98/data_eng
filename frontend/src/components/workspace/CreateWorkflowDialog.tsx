@@ -4,19 +4,12 @@ import { Button, Dialog, TextArea, TextField, useToast } from "@/ui";
 
 interface Props {
   open: boolean;
-  workspaceId: string;
   notebookPath: string;
   onClose: () => void;
   onCreated: (workflowId: string) => void;
 }
 
-export function CreateWorkflowDialog({
-  open,
-  workspaceId,
-  notebookPath,
-  onClose,
-  onCreated,
-}: Props) {
+export function CreateWorkflowDialog({ open, notebookPath, onClose, onCreated }: Props) {
   const toast = useToast();
   const base = notebookPath.split("/").pop()?.replace(/\.ipynb$/, "") ?? "workflow";
   const [name, setName] = useState(base);
@@ -47,7 +40,6 @@ export function CreateWorkflowDialog({
             key: "t1",
             name: base,
             type: "NOTEBOOK",
-            workspace_id: workspaceId,
             notebook_path: notebookPath,
             parameters,
             ui_position: { x: 80, y: 80 },

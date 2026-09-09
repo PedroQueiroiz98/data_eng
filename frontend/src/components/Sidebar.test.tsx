@@ -12,7 +12,7 @@ describe("Sidebar", () => {
     );
     for (const label of [
       "Dashboard",
-      "Workspaces",
+      "Workspace",
       "Workflows",
       "Jobs",
       "Execuções",
@@ -27,8 +27,11 @@ describe("Sidebar", () => {
       "href",
       "/notifications",
     );
+    expect(screen.getByText("Workspace").closest("a")).toHaveAttribute(
+      "href",
+      "/workspace",
+    );
     // sem cabeçalhos de grupo
-    expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
     expect(screen.queryByText("Administração")).not.toBeInTheDocument();
   });
 });

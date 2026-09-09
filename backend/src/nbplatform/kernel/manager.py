@@ -75,12 +75,13 @@ class KernelSessionManager:
             if len(self.sessions) >= self.settings.kernel_max_sessions:
                 await self._evict_idle()
 
-            ws_root = Path(self.settings.workspaces_dir) / meta["workspace_id"]
+            # Single-workspace: raiz sempre `workspace_dir` (mostrada como /root).
+            ws_root = Path(self.settings.workspace_dir)
             # cwd = pasta do notebook (convenção Jupyter/Databricks: `../data/x.csv`
             # resolve a partir de onde o notebook está). WORKSPACE_ROOT continua a raiz.
             nb_path = meta.get("notebook_path", "")
             cwd = ws_root
-            if nb_path and "/" in nb_path:
+            if nb_path:
                 cand = (ws_root / nb_path).parent
                 if cand.is_dir():
                     cwd = cand

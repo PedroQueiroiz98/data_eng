@@ -211,6 +211,34 @@ function EditorInner({ id }: { id: string }) {
         }
       />
 
+      {wf.status === "INVALID" && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>
+            ⚠ Workflow inválido — um notebook usado por este workflow foi removido
+            ou movido em <span className="font-mono">/root</span>. Reaponte a etapa
+            para um notebook existente e salve.
+          </span>
+          <button
+            type="button"
+            className="rounded border border-danger/50 px-2 py-0.5 text-xs hover:bg-danger/15"
+            onClick={() => {
+              if (selectedId) setPickerOpen(true);
+              else toast.error("Selecione a etapa afetada primeiro.");
+            }}
+          >
+            Localizar arquivo
+          </button>
+          <button
+            type="button"
+            className="rounded border border-danger/50 px-2 py-0.5 text-xs hover:bg-danger/15"
+            disabled={!selectedId}
+            onClick={removeSelected}
+          >
+            Remover etapa
+          </button>
+        </div>
+      )}
+
       {(run.isError || saveGraph.isError) && (
         <p className="mb-2 text-sm text-danger">
           {((run.error ?? saveGraph.error) as Error).message}
@@ -304,9 +332,9 @@ function EditorInner({ id }: { id: string }) {
       <WorkspaceNotebookPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPick={({ workspaceId, notebookPath, label }) =>
+        onPick={({ notebookPath, label }) =>
           patchSelected({
-            workspaceId,
+            workspaceId: "root",
             notebookPath,
             notebookName: label,
             notebookId: null,

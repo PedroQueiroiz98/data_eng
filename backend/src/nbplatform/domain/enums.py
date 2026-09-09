@@ -40,6 +40,8 @@ class WorkflowStatus(StrEnum):
     ACTIVE = "ACTIVE"
     DISABLED = "DISABLED"
     ARCHIVED = "ARCHIVED"
+    # Uma etapa aponta para um notebook que não existe mais no Workspace.
+    INVALID = "INVALID"
 
 
 class TaskType(StrEnum):

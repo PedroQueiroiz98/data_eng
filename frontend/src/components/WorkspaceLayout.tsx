@@ -3,6 +3,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { useAuthContext } from "@/components/AuthProvider";
 import { Header } from "@/components/Header";
 import { Sidebar } from "@/components/Sidebar";
+import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents";
 import { SpinnerIcon } from "@/ui/icons";
 
 /**
@@ -13,6 +14,7 @@ import { SpinnerIcon } from "@/ui/icons";
 export function WorkspaceLayout() {
   const { user, loading } = useAuthContext();
   const [mobileOpen, setMobileOpen] = useState(false);
+  useWorkspaceEvents();
 
   if (loading) {
     return (

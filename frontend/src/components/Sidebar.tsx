@@ -23,7 +23,7 @@ interface Item {
 
 const ITEMS: Item[] = [
   { label: "Dashboard", to: "/dashboard", Icon: DashboardIcon },
-  { label: "Workspaces", to: "/workspaces", Icon: WorkspaceIcon },
+  { label: "Workspace", to: "/workspace", Icon: WorkspaceIcon },
   { label: "Workflows", to: "/workflows", Icon: WorkflowIcon },
   { label: "Jobs", to: "/jobs", Icon: JobsIcon },
   { label: "Execuções", to: "/executions", Icon: HistoryIcon },

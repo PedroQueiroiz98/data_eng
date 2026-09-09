@@ -101,7 +101,8 @@ COPY . .
 
 RUN mkdir -p \
     /data/executions \
-    /data/workspaces
+    /data/workspaces \
+    /data/workspace
 
 # ============================================================
 # Usuário não-root

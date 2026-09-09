@@ -27,31 +27,36 @@ export interface GitBranches {
   branches: string[];
 }
 
-const base = (id: string) => `/workspaces/${id}/git`;
+// Workspace único: rota fixa. O 1º parâmetro `_id` é mantido só por compat de
+// assinatura (as telas ainda o passam) e é ignorado.
+const BASE = "/workspace/git";
 
-export const gitStatus = (id: string): Promise<GitStatus> => apiGet(`${base(id)}/status`);
+export const gitStatus = (_id?: string): Promise<GitStatus> => apiGet(`${BASE}/status`);
 
-export const gitDiff = (id: string, path?: string): Promise<{ path: string | null; diff: string }> =>
-  apiGet(`${base(id)}/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+export const gitDiff = (
+  _id?: string,
+  path?: string,
+): Promise<{ path: string | null; diff: string }> =>
+  apiGet(`${BASE}/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`);
 
-export const gitLog = (id: string, limit = 50): Promise<GitCommitEntry[]> =>
-  apiGet(`${base(id)}/log?limit=${limit}`);
+export const gitLog = (_id?: string, limit = 50): Promise<GitCommitEntry[]> =>
+  apiGet(`${BASE}/log?limit=${limit}`);
 
-export const gitBranches = (id: string): Promise<GitBranches> => apiGet(`${base(id)}/branches`);
+export const gitBranches = (_id?: string): Promise<GitBranches> => apiGet(`${BASE}/branches`);
 
-export const gitInit = (id: string): Promise<GitStatus> => apiPost(`${base(id)}/init`);
+export const gitInit = (_id?: string): Promise<GitStatus> => apiPost(`${BASE}/init`);
 
-export const gitCreateBranch = (id: string, name: string): Promise<{ branch: string }> =>
-  apiPost(`${base(id)}/branches`, { name });
+export const gitCreateBranch = (_id: string, name: string): Promise<{ branch: string }> =>
+  apiPost(`${BASE}/branches`, { name });
 
-export const gitCheckout = (id: string, ref: string): Promise<{ ref: string }> =>
-  apiPost(`${base(id)}/checkout`, { ref });
+export const gitCheckout = (_id: string, ref: string): Promise<{ ref: string }> =>
+  apiPost(`${BASE}/checkout`, { ref });
 
 export const gitCommit = (
-  id: string,
+  _id: string,
   message: string,
   paths: string[],
-): Promise<{ sha: string }> => apiPost(`${base(id)}/commit`, { message, paths });
+): Promise<{ sha: string }> => apiPost(`${BASE}/commit`, { message, paths });
 
-export const gitDiscard = (id: string, paths: string[]): Promise<{ discarded: number }> =>
-  apiPost(`${base(id)}/discard`, { paths });
+export const gitDiscard = (_id: string, paths: string[]): Promise<{ discarded: number }> =>
+  apiPost(`${BASE}/discard`, { paths });

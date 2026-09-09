@@ -7,6 +7,7 @@ import contextlib
 import json
 import uuid
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -14,9 +15,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import NotFoundError
 from nbplatform.db.session import session_scope
-from nbplatform.domain.enums import WORKSPACE_ROLE_RANK, WorkspaceRole
 from nbplatform.queue.redis_client import get_redis
-from nbplatform.repositories.workspace_repository import WorkspaceRepository
 from nbplatform.schemas.execution import ExecutionDetail, ExecutionLogRead
 from nbplatform.schemas.job import JobLogRead
 from nbplatform.services.execution_service import ExecutionService
@@ -25,6 +24,7 @@ from nbplatform.ws.events import (
     subscribe_execution_events,
     subscribe_job_events,
     subscribe_kernel_events,
+    subscribe_workspace_events,
 )
 
 router = APIRouter()
@@ -141,22 +141,8 @@ async def kernel_ws(websocket: WebSocket, session_id: str) -> None:
     redis = get_redis()
     meta = await redis.hgetall(settings.kernel_sess_key(session_id))
     user_id = str(claims.get("sub", ""))
-    if not meta or meta.get("user_id") != user_id:
-        await websocket.close(code=1008)
-        return
-
-    # ACL do Workspace: precisa ser EDITOR+ (admin global tem bypass).
-    allowed = claims.get("role") == "admin"
-    if not allowed:
-        with contextlib.suppress(Exception):
-            async with session_scope() as session:
-                member = await WorkspaceRepository(session).get_member(
-                    uuid.UUID(str(meta["workspace_id"])), uuid.UUID(user_id)
-                )
-            allowed = member is not None and (
-                WORKSPACE_ROLE_RANK[member.role] >= WORKSPACE_ROLE_RANK[WorkspaceRole.EDITOR]
-            )
-    if not allowed:
+    # Single-workspace: basta ser o dono da sessão de kernel (ou admin global).
+    if not meta or (meta.get("user_id") != user_id and claims.get("role") != "admin"):
         await websocket.close(code=1008)
         return
 
@@ -183,6 +169,74 @@ async def kernel_ws(websocket: WebSocket, session_id: str) -> None:
 
     await websocket.send_json(snapshot)
     async with subscribe_kernel_events(redis, session_id) as stream:
+        client_gone = asyncio.create_task(_wait_client_close(websocket))
+        try:
+            async for event in stream:
+                if client_gone.done():
+                    break
+                await websocket.send_json(event)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            client_gone.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await client_gone
+    with contextlib.suppress(RuntimeError):
+        await websocket.close()
+
+
+@router.websocket("/ws/workspace")
+async def workspace_ws(websocket: WebSocket) -> None:
+    """Eventos de filesystem do Workspace único (File Explorer em tempo real).
+
+    Snapshot = árvore atual + `seq`; depois relay dos `fs.batch` do watcher.
+    `?after_seq=` replaia o buffer Redis para não perder eventos numa reconexão.
+    """
+    await websocket.accept()
+    if not _authenticated(websocket):
+        await websocket.close(code=1008)
+        return
+
+    from nbplatform.core.config import get_settings as _get_settings
+    from nbplatform.schemas.workspace import FileNode as _FileNode
+    from nbplatform.services.workspace_fs_service import WorkspaceFsService
+
+    settings = _get_settings()
+    redis = get_redis()
+    after_seq = int(websocket.query_params.get("after_seq", "0") or 0)
+
+    fs = WorkspaceFsService(
+        Path(settings.workspace_dir),
+        max_upload_bytes=settings.workspace_max_upload_bytes,
+        max_nodes=settings.workspace_tree_max_nodes,
+        max_depth=settings.workspace_tree_max_depth,
+    )
+    try:
+        tree = await fs.list_tree(rel_path="")
+        tree_json = _FileNode.model_validate(tree, from_attributes=True).model_dump(mode="json")
+    except Exception:  # noqa: BLE001
+        tree_json = {"name": "", "path": "", "type": "dir", "children": []}
+
+    seq_raw = await redis.get(settings.redis_workspace_seq_key)
+    current_seq = int(seq_raw or 0)
+
+    buffered: list[dict[str, Any]] = []
+    if after_seq and after_seq < current_seq:
+        for raw in await redis.lrange(settings.redis_workspace_log_key, 0, -1):
+            try:
+                evt = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if int(evt.get("seq", 0)) > after_seq:
+                buffered.append(evt)
+
+    await websocket.send_json(
+        {"type": "snapshot", "tree": tree_json, "seq": current_seq}
+    )
+    for evt in buffered:
+        await websocket.send_json(evt)
+
+    async with subscribe_workspace_events(redis) as stream:
         client_gone = asyncio.create_task(_wait_client_close(websocket))
         try:
             async for event in stream:

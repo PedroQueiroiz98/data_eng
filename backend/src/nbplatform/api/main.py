@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -35,6 +37,8 @@ from nbplatform.core.logging import configure_logging
 from nbplatform.db.session import dispose_engine
 from nbplatform.queue.redis_client import close_redis
 from nbplatform.services.seed import ensure_admin_user
+from nbplatform.services.workspace_service import ensure_singleton_workspace
+from nbplatform.services.workspace_watcher import run_workspace_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +48,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level, service="api")
     logger.info("api starting", extra={"app_env": settings.app_env})
+    watcher_stop = asyncio.Event()
+    watcher_task: asyncio.Task[None] | None = None
     if not settings.is_test:
         try:
             await ensure_admin_user()
+            await ensure_singleton_workspace()
         except Exception:  # noqa: BLE001 - startup não deve morrer por causa do seed
-            logger.exception("seed do admin falhou (seguindo mesmo assim)")
+            logger.exception("seed falhou (seguindo mesmo assim)")
+        if settings.workspace_events_enabled:
+            watcher_task = asyncio.create_task(run_workspace_watcher(watcher_stop))
     yield
+    watcher_stop.set()
+    if watcher_task is not None:
+        watcher_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher_task
     await close_redis()
     await dispose_engine()
     logger.info("api stopped")

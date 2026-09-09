@@ -50,7 +50,6 @@ export function EditorSurface({ workspaceId, tabs, activeTab, onDirtyChange }: P
               <WorkspaceDataTab workspaceId={workspaceId} path={tab.path} />
             ) : (
               <FilePreview
-                workspaceId={workspaceId}
                 path={tab.path}
                 active={active}
                 onDirtyChange={onDirtyChange}

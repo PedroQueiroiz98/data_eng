@@ -1,95 +1,52 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   copyEntry,
-  createWorkspace,
   deleteEntry,
-  deleteWorkspace,
   generateFile,
   type GenerateFileBody,
   getTree,
   getWorkspace,
-  listWorkspaces,
   makeDir,
   readFile,
   renameEntry,
-  updateWorkspace,
   writeFile,
 } from "@/lib/workspace";
 
+/** Workspace único: chaves sem id. */
 const keys = {
-  all: ["workspaces"] as const,
-  detail: (id: string) => ["workspaces", id] as const,
-  tree: (id: string, path: string) => ["workspaces", id, "tree", path] as const,
-  file: (id: string, path: string) => ["workspaces", id, "file", path] as const,
+  detail: ["workspace"] as const,
+  tree: (path: string) => ["workspace", "tree", path] as const,
+  file: (path: string) => ["workspace", "file", path] as const,
 };
 
-export function useWorkspaces(includeInactive = false) {
+export function useWorkspace() {
+  return useQuery({ queryKey: keys.detail, queryFn: getWorkspace });
+}
+
+export function useWorkspaceTree(path = "") {
+  return useQuery({ queryKey: keys.tree(path), queryFn: () => getTree(path) });
+}
+
+export function useWorkspaceFile(path: string | null) {
   return useQuery({
-    queryKey: [...keys.all, { includeInactive }],
-    queryFn: () => listWorkspaces(includeInactive),
-  });
-}
-
-export function useWorkspace(id: string) {
-  return useQuery({ queryKey: keys.detail(id), queryFn: () => getWorkspace(id) });
-}
-
-export function useCreateWorkspace() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: createWorkspace,
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
-  });
-}
-
-export function useUpdateWorkspace(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { name?: string; description?: string; is_active?: boolean }) =>
-      updateWorkspace(id, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: keys.all });
-      void qc.invalidateQueries({ queryKey: keys.detail(id) });
-    },
-  });
-}
-
-export function useDeleteWorkspace() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, purge }: { id: string; purge?: boolean }) =>
-      deleteWorkspace(id, purge),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
-  });
-}
-
-export function useWorkspaceTree(id: string, path = "") {
-  return useQuery({
-    queryKey: keys.tree(id, path),
-    queryFn: () => getTree(id, path),
-  });
-}
-
-export function useWorkspaceFile(id: string, path: string | null) {
-  return useQuery({
-    queryKey: keys.file(id, path ?? ""),
-    queryFn: () => readFile(id, path as string),
+    queryKey: keys.file(path ?? ""),
+    queryFn: () => readFile(path as string),
     enabled: !!path,
   });
 }
 
-/** Invalida a árvore inteira do workspace (qualquer subcaminho). */
-function invalidateTree(qc: ReturnType<typeof useQueryClient>, id: string) {
-  void qc.invalidateQueries({ queryKey: ["workspaces", id, "tree"] });
+/** Invalida a árvore inteira (qualquer subcaminho). */
+function invalidateTree(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["workspace", "tree"] });
 }
 
 /** Invalida árvore + todos os conteúdos de arquivo em cache (rename/delete/move). */
-function invalidateWorkspace(qc: ReturnType<typeof useQueryClient>, id: string) {
-  void qc.invalidateQueries({ queryKey: ["workspaces", id, "tree"] });
-  void qc.invalidateQueries({ queryKey: ["workspaces", id, "file"] });
+function invalidateWorkspace(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["workspace", "tree"] });
+  void qc.invalidateQueries({ queryKey: ["workspace", "file"] });
 }
 
-export function useWriteFile(id: string) {
+export function useWriteFile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -102,54 +59,54 @@ export function useWriteFile(id: string) {
       text?: string;
       notebook?: Record<string, unknown>;
       ifMatch?: string | null;
-    }) => writeFile(id, path, { text, notebook, ifMatch }),
+    }) => writeFile(path, { text, notebook, ifMatch }),
     onSuccess: (_data, vars) => {
-      invalidateTree(qc, id);
-      void qc.invalidateQueries({ queryKey: keys.file(id, vars.path) });
+      invalidateTree(qc);
+      void qc.invalidateQueries({ queryKey: keys.file(vars.path) });
     },
   });
 }
 
-export function useMakeDir(id: string) {
+export function useMakeDir() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (path: string) => makeDir(id, path),
-    onSuccess: () => invalidateTree(qc, id),
+    mutationFn: (path: string) => makeDir(path),
+    onSuccess: () => invalidateTree(qc),
   });
 }
 
-export function useDeleteEntry(id: string) {
+export function useDeleteEntry() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ path, recursive }: { path: string; recursive?: boolean }) =>
-      deleteEntry(id, path, recursive),
-    onSuccess: () => invalidateWorkspace(qc, id),
+      deleteEntry(path, recursive),
+    onSuccess: () => invalidateWorkspace(qc),
   });
 }
 
-export function useRenameEntry(id: string) {
+export function useRenameEntry() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ from, to }: { from: string; to: string }) => renameEntry(id, from, to),
-    onSuccess: () => invalidateWorkspace(qc, id),
+    mutationFn: ({ from, to }: { from: string; to: string }) => renameEntry(from, to),
+    onSuccess: () => invalidateWorkspace(qc),
   });
 }
 
-export function useCopyEntry(id: string) {
+export function useCopyEntry() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ from, to }: { from: string; to: string }) => copyEntry(id, from, to),
-    onSuccess: () => invalidateTree(qc, id),
+    mutationFn: ({ from, to }: { from: string; to: string }) => copyEntry(from, to),
+    onSuccess: () => invalidateTree(qc),
   });
 }
 
-export function useGenerateFile(id: string) {
+export function useGenerateFile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: GenerateFileBody) => generateFile(id, body),
+    mutationFn: (body: GenerateFileBody) => generateFile(body),
     onSuccess: (_data, vars) => {
-      invalidateTree(qc, id);
-      void qc.invalidateQueries({ queryKey: keys.file(id, vars.path) });
+      invalidateTree(qc);
+      void qc.invalidateQueries({ queryKey: keys.file(vars.path) });
     },
   });
 }

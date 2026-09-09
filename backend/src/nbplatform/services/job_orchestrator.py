@@ -262,7 +262,21 @@ class JobOrchestrator:
         params = {**(wtask.parameters or {}), **(job.parameters or {})}
 
         if getattr(wtask, "workspace_id", None) and getattr(wtask, "notebook_path", None):
-            # Notebook = arquivo do Workspace (source=WORKSPACE, Papermill lê do disco)
+            # Notebook = arquivo do Workspace (source=WORKSPACE, Papermill lê do disco).
+            # Falha cedo e claro se o arquivo não existe mais (rename/delete sem fixup).
+            try:
+                from nbplatform.services.workflow_service import _workspace_fs
+
+                await _workspace_fs().read_file(wtask.notebook_path)
+            except Exception:  # noqa: BLE001
+                jt.status = JobTaskStatus.FAILED
+                jt.finished_at = _now()
+                jt.error_message = f"notebook não encontrado em /root: {wtask.notebook_path}"
+                await self._log(
+                    session, job.id, jt.id,
+                    f"tarefa '{wtask.name}' → FAILED (notebook ausente: {wtask.notebook_path})",
+                )
+                return None
             try:
                 execution, _ = await ExecutionService(session).create_for_workspace(
                     wtask.workspace_id,

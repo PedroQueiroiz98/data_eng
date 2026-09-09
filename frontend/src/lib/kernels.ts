@@ -36,36 +36,32 @@ export interface KernelEvent {
   duration_ms?: number;
 }
 
+// Workspace único: rota fixa `/api/workspace/kernel`. O 1º parâmetro (`_ws`) é
+// mantido só por compat de assinatura das telas e é ignorado.
+const K = "/workspace/kernel/sessions";
+
 export const openKernelSession = (
-  workspaceId: string,
+  _ws: string,
   notebookPath: string,
 ): Promise<KernelSession> =>
-  apiPost(`/workspaces/${workspaceId}/kernel/sessions`, {
-    notebook_path: notebookPath,
-  });
+  apiPost(K, { notebook_path: notebookPath });
 
-export const getKernelSession = (
-  workspaceId: string,
-  sessionId: string,
-): Promise<KernelSession> =>
-  apiGet(`/workspaces/${workspaceId}/kernel/sessions/${sessionId}`);
+export const getKernelSession = (_ws: string, sessionId: string): Promise<KernelSession> =>
+  apiGet(`${K}/${sessionId}`);
 
 export const executeCell = (
-  workspaceId: string,
+  _ws: string,
   sessionId: string,
   cellId: string,
   code: string,
 ): Promise<{ request_id: string }> =>
-  apiPost(
-    `/workspaces/${workspaceId}/kernel/sessions/${sessionId}/execute`,
-    { cell_id: cellId, code },
-  );
+  apiPost(`${K}/${sessionId}/execute`, { cell_id: cellId, code });
 
-export const interruptKernel = (workspaceId: string, sessionId: string): Promise<unknown> =>
-  apiPost(`/workspaces/${workspaceId}/kernel/sessions/${sessionId}/interrupt`);
+export const interruptKernel = (_ws: string, sessionId: string): Promise<unknown> =>
+  apiPost(`${K}/${sessionId}/interrupt`);
 
-export const restartKernel = (workspaceId: string, sessionId: string): Promise<unknown> =>
-  apiPost(`/workspaces/${workspaceId}/kernel/sessions/${sessionId}/restart`);
+export const restartKernel = (_ws: string, sessionId: string): Promise<unknown> =>
+  apiPost(`${K}/${sessionId}/restart`);
 
-export const closeKernel = (workspaceId: string, sessionId: string): Promise<void> =>
-  apiDelete(`/workspaces/${workspaceId}/kernel/sessions/${sessionId}`);
+export const closeKernel = (_ws: string, sessionId: string): Promise<void> =>
+  apiDelete(`${K}/${sessionId}`);

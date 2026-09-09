@@ -73,17 +73,18 @@ async def test_save_graph_rejects_missing_workspace_notebook(client) -> None:
 async def test_file_paths_endpoint(client) -> None:
     ws_id, nb_path = await make_workspace_notebook(client)
     put = await client.put(
-        f"/api/workspaces/{ws_id}/file",
+        "/api/workspace/file",
         params={"path": "data/x.csv"},
         json={"text": "a,b\n1,2\n"},
     )
     assert put.status_code == 200
     r = await client.get(
-        f"/api/workspaces/{ws_id}/file/paths",
+        "/api/workspace/file/paths",
         params={"path": "data/x.csv", "from_path": nb_path},
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["workspace_path"].endswith("/data/x.csv")
+    assert body["workspace_path"] == "/root/data/x.csv"
     assert body["name"] == "x.csv"
-    assert body["read_example"] == 'pd.read_csv("../data/x.csv")'
+    # o notebook (from_path) está na raiz → caminho relativo é "data/x.csv"
+    assert body["read_example"] == 'pd.read_csv("data/x.csv")'

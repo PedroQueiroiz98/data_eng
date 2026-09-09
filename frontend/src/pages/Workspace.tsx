@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   useCopyEntry,
   useDeleteEntry,
@@ -105,13 +105,13 @@ const emitCommand = (cmd: string): void => {
 };
 
 export function Workspace() {
-  const { id = "" } = useParams();
+  const WS = "root"; // Workspace único (`/root`) — sem seletor/switcher
   const toast = useToast();
   const confirm = useConfirm();
   const navigate = useNavigate();
 
-  const ws = useWorkspace(id);
-  const tree = useWorkspaceTree(id);
+  const ws = useWorkspace();
+  const tree = useWorkspaceTree();
 
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const view = useWorkspaceStore(selectView);
@@ -136,8 +136,8 @@ export function Workspace() {
   } = useWorkspaceStore();
 
   useEffect(() => {
-    setActiveWorkspace(id);
-  }, [id, setActiveWorkspace]);
+    setActiveWorkspace(WS);
+  }, [setActiveWorkspace]);
 
   const expandedSet = useMemo(() => new Set(view.expandedDirs), [view.expandedDirs]);
   const openPaths = useMemo(() => view.tabs.map((t) => t.path), [view.tabs]);
@@ -146,12 +146,12 @@ export function Workspace() {
     [dirtyByPath],
   );
 
-  const writeFile = useWriteFile(id);
-  const makeDir = useMakeDir(id);
-  const rename = useRenameEntry(id);
-  const copy = useCopyEntry(id);
-  const del = useDeleteEntry(id);
-  const generate = useGenerateFile(id);
+  const writeFile = useWriteFile();
+  const makeDir = useMakeDir();
+  const rename = useRenameEntry();
+  const copy = useCopyEntry();
+  const del = useDeleteEntry();
+  const generate = useGenerateFile();
 
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptValue, setPromptValue] = useState("");
@@ -395,7 +395,7 @@ export function Workspace() {
     e.target.value = "";
     if (!file) return;
     try {
-      await uploadFile(id, uploadTarget.current, file);
+      await uploadFile(uploadTarget.current, file);
       setExpanded(uploadTarget.current, true);
       void tree.refetch();
       toast.success(`Enviado: ${file.name}`);
@@ -406,7 +406,7 @@ export function Workspace() {
 
   const onDownload = async (node: FileNode) => {
     try {
-      await downloadFile(id, node.path);
+      await downloadFile(node.path);
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -423,7 +423,7 @@ export function Workspace() {
           ? relativeFrom(view.activeTab, node.path)
           : node.path;
       } else {
-        const info = await getFilePaths(id, node.path, view.activeTab ?? undefined);
+        const info = await getFilePaths(node.path, view.activeTab ?? undefined);
         value =
           kind === "repo"
             ? info.repository_path
@@ -445,7 +445,7 @@ export function Workspace() {
 
   const onRun = async (node: FileNode) => {
     try {
-      const exec = await executeWorkspaceNotebook(id, node.path);
+      const exec = await executeWorkspaceNotebook(node.path);
       toast.success("Execução iniciada");
       navigate(`/executions/${exec.id}`);
     } catch (err) {
@@ -456,7 +456,7 @@ export function Workspace() {
   const onExport = async (node: FileNode) => {
     try {
       // Notebook → exporta como .py (nbconvert). Para .ipynb cru use "Baixar".
-      await downloadExport(id, node.path, "py");
+      await downloadExport(WS, node.path, "py");
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -746,7 +746,7 @@ export function Workspace() {
             />
           )}
           <EditorSurface
-            workspaceId={id}
+            workspaceId={WS}
             tabs={view.tabs}
             activeTab={view.activeTab}
             onDirtyChange={onDirtyChange}
@@ -754,7 +754,7 @@ export function Workspace() {
         </section>
       </div>
 
-      <ExecutionPanel workspaceId={id} />
+      <ExecutionPanel workspaceId={WS} />
 
       <div className="flex h-6 shrink-0 items-center gap-3 border-t border-surface-border bg-surface px-3 text-[11px] text-fg-faint">
         <span>{ws.data.name}</span>

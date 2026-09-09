@@ -34,8 +34,8 @@ test: test-backend test-frontend ## Roda todos os testes
 
 test-backend: ## Testes do backend (migrations + pytest dentro do container)
 	$(COMPOSE) run --rm -e APP_ENV=test -e NBP_INTEGRATION=1 \
-		-e REDIS_URL=redis://redis:6379/1 backend \
-		sh -c "alembic upgrade head && pytest -q"
+		-e REDIS_URL=redis://redis:6379/1 -e NBP_WORKSPACE_DIR=/tmp/ws-test backend \
+		sh -c "rm -rf /tmp/ws-test && alembic upgrade head && pytest -q"
 
 test-frontend: ## Testes do frontend (vitest + tsc)
 	$(COMPOSE) run --rm frontend sh -c "pnpm test && pnpm exec tsc --noEmit"

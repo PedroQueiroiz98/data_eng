@@ -39,7 +39,7 @@ async def _prepare(client, content: dict) -> tuple[str, str]:
     ws_id = await make_workspace(client)
     path = "notebooks/w.ipynb"
     resp = await client.put(
-        f"/api/workspaces/{ws_id}/file",
+        "/api/workspace/file",
         params={"path": path},
         json={"notebook": content},
     )

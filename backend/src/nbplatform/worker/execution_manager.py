@@ -207,7 +207,8 @@ class ExecutionManager:
                 assert workspace_id is not None and notebook_path is not None, (
                     "execução WORKSPACE sem workspace_id/notebook_path"
                 )
-                root = Path(self.settings.workspaces_dir) / str(workspace_id)
+                # Single-workspace: a raiz é sempre `workspace_dir` (mostrada como /root).
+                root = Path(self.settings.workspace_dir)
                 content: dict[str, Any] = _read_workspace_notebook(root, notebook_path)
                 # subprocess sandbox: o filho compartilha o FS do worker, então o
                 # workspace_sdk enxerga esta raiz. No sandbox docker o volume ainda

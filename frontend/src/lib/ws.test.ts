@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openExecutionSocket } from "@/lib/ws";
+import { openExecutionSocket, openWorkspaceSocket } from "@/lib/ws";
 import type { ExecutionDetail } from "@/lib/executions";
 
 class MockWebSocket {
@@ -101,5 +101,29 @@ describe("openExecutionSocket", () => {
     expect(ws.closed).toBe(true);
     vi.advanceTimersByTime(60_000);
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("openWorkspaceSocket", () => {
+  it("conecta em /workspace, entrega snapshot + fs.batch e retoma por after_seq", () => {
+    const onSnapshot = vi.fn();
+    const onBatch = vi.fn();
+    openWorkspaceSocket(
+      { onSnapshot, onBatch },
+      { WebSocketImpl: MockWebSocket as unknown as typeof WebSocket, baseUrl: "ws://x/ws" },
+    );
+    const ws = MockWebSocket.last();
+    expect(ws.url).toBe("ws://x/ws/workspace?after_seq=0");
+
+    ws.onopen?.();
+    ws.emit({ type: "snapshot", tree: { name: "", path: "", type: "dir", children: [] }, seq: 4 });
+    expect(onSnapshot).toHaveBeenCalledOnce();
+
+    ws.emit({ type: "fs.batch", seq: 7, ts: 1, changes: [{ op: "created", path: "a.csv", is_dir: false }] });
+    expect(onBatch).toHaveBeenCalledWith(expect.objectContaining({ seq: 7 }));
+
+    ws.onclose?.();
+    vi.advanceTimersByTime(20_000);
+    expect(MockWebSocket.last().url).toBe("ws://x/ws/workspace?after_seq=7");
   });
 });

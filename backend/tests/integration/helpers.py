@@ -59,15 +59,13 @@ async def make_notebook(client, name: str, content: dict) -> str:
 
 _UNIQ = 0
 
+# Modo single-workspace: o `workspace_id` é sempre este UUID fixo (`/root`).
+SINGLETON_WORKSPACE_ID = "00000000-0000-0000-0000-0000000000a1"
+
 
 async def make_workspace(client, name: str | None = None) -> str:
-    global _UNIQ
-    _UNIQ += 1
-    resp = await client.post(
-        "/api/workspaces", json={"name": name or f"ws-{_UNIQ}-{uuid.uuid4().hex[:6]}"}
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
+    """Compat: não há mais criação de Workspace — devolve o id do singleton."""
+    return SINGLETON_WORKSPACE_ID
 
 
 async def make_workspace_notebook(
@@ -75,23 +73,28 @@ async def make_workspace_notebook(
     *,
     source: str = "value = 0\n",
     params_source: str = "value = 0\n",
-    path: str = "notebooks/nb.ipynb",
+    path: str | None = None,
 ) -> tuple[str, str]:
-    """Cria um Workspace + escreve um `.ipynb` nele. Retorna (workspace_id, path)."""
-    ws_id = await make_workspace(client)
+    """Escreve um `.ipynb` em `/root`. Retorna (workspace_id, path).
+
+    `path` recebe um sufixo único para os testes não colidirem no mesmo dir.
+    """
+    global _UNIQ
+    _UNIQ += 1
+    rel = path or f"nb-{_UNIQ}-{uuid.uuid4().hex[:6]}.ipynb"
     resp = await client.put(
-        f"/api/workspaces/{ws_id}/file",
-        params={"path": path},
+        "/api/workspace/file",
+        params={"path": rel},
         json={"notebook": notebook_content(source, params_source=params_source)},
     )
     assert resp.status_code == 200, resp.text
-    return ws_id, path
+    return SINGLETON_WORKSPACE_ID, rel
 
 
 async def execute_ws_notebook(client, ws_id: str, path: str, **body):
-    """`POST /api/workspaces/{id}/execute` — substitui o antigo /api/notebooks/{id}/execute."""
+    """`POST /api/workspace/execute` (Workspace único)."""
     payload = {"notebook_path": path, **body}
-    return await client.post(f"/api/workspaces/{ws_id}/execute", json=payload)
+    return await client.post("/api/workspace/execute", json=payload)
 
 
 async def make_workflow(client, name: str, tasks: list[dict], deps: list[dict]) -> str:

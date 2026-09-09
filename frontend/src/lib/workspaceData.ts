@@ -10,23 +10,23 @@ export interface DataPreview {
 }
 
 export const fetchDataPreview = (
-  workspaceId: string,
+  _ws: string,
   path: string,
   offset = 0,
   limit = 100,
 ): Promise<DataPreview> =>
   apiGet(
-    `/workspaces/${workspaceId}/data?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`,
+    `/workspace/data?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`,
   );
 
 export async function downloadExport(
-  workspaceId: string,
+  _ws: string,
   path: string,
   fmt: "ipynb" | "py",
 ): Promise<void> {
   const token = getAuthToken();
   const res = await fetch(
-    `/api/workspaces/${workspaceId}/export?path=${encodeURIComponent(path)}&fmt=${fmt}`,
+    `/api/workspace/export?path=${encodeURIComponent(path)}&fmt=${fmt}`,
     { headers: token ? { Authorization: `Bearer ${token}` } : {} },
   );
   if (!res.ok) throw new Error(`Export falhou (${res.status})`);

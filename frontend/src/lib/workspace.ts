@@ -47,52 +47,18 @@ export interface FileContent {
   etag?: string | null;
 }
 
-// ─── Workspace CRUD ─────────────────────────────────────────────────────────
-export const listWorkspaces = (includeInactive = false): Promise<Workspace[]> =>
-  apiGet(`/workspaces?include_inactive=${includeInactive}`);
-
-export const getWorkspace = (id: string): Promise<WorkspaceDetail> =>
-  apiGet(`/workspaces/${id}`);
-
-export const createWorkspace = (body: {
-  name: string;
-  description?: string;
-}): Promise<WorkspaceDetail> => apiPost("/workspaces", body);
-
-// PATCH não tem helper dedicado no api.ts → fetch direto (mesma semântica de erro).
-export async function updateWorkspace(
-  id: string,
-  body: { name?: string; description?: string; is_active?: boolean },
-): Promise<WorkspaceDetail> {
-  const res = await fetch(`${API_BASE}/workspaces/${id}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  const parsed = text ? JSON.parse(text) : null;
-  if (!res.ok) {
-    throw new Error(parsed?.error?.message ?? `PATCH /workspaces/${id} → ${res.status}`);
-  }
-  return parsed as WorkspaceDetail;
-}
-
-export const deleteWorkspace = (id: string, purge = false): Promise<void> =>
-  apiDelete(`/workspaces/${id}?purge=${purge}`);
+// ─── Workspace único (`/root`) ─────────────────────────────────────────────
+export const getWorkspace = (): Promise<WorkspaceDetail> => apiGet(`/workspace`);
 
 // ─── File Explorer ─────────────────────────────────────────────────────────
-export const getTree = (id: string, path = "", depth?: number): Promise<FileNode> => {
+export const getTree = (path = "", depth?: number): Promise<FileNode> => {
   const qs = new URLSearchParams({ path });
   if (depth != null) qs.set("depth", String(depth));
-  return apiGet(`/workspaces/${id}/tree?${qs.toString()}`);
+  return apiGet(`/workspace/tree?${qs.toString()}`);
 };
 
-export const readFile = (id: string, path: string): Promise<FileContent> =>
-  apiGet(`/workspaces/${id}/file?path=${encodeURIComponent(path)}`);
+export const readFile = (path: string): Promise<FileContent> =>
+  apiGet(`/workspace/file?path=${encodeURIComponent(path)}`);
 
 export interface FilePaths {
   path: string;
@@ -103,51 +69,44 @@ export interface FilePaths {
   read_example: string | null;
 }
 
-export const getFilePaths = (
-  id: string,
-  path: string,
-  fromPath?: string,
-): Promise<FilePaths> => {
+export const getFilePaths = (path: string, fromPath?: string): Promise<FilePaths> => {
   const qs = new URLSearchParams({ path });
   if (fromPath) qs.set("from_path", fromPath);
-  return apiGet(`/workspaces/${id}/file/paths?${qs.toString()}`);
+  return apiGet(`/workspace/file/paths?${qs.toString()}`);
 };
 
 export const writeFile = (
-  id: string,
   path: string,
   body: { text?: string; notebook?: Record<string, unknown>; ifMatch?: string | null },
 ): Promise<FileContent> =>
   apiPut(
-    `/workspaces/${id}/file?path=${encodeURIComponent(path)}`,
+    `/workspace/file?path=${encodeURIComponent(path)}`,
     { text: body.text, notebook: body.notebook },
     body.ifMatch ? { "If-Match": body.ifMatch } : undefined,
   );
 
-export const makeDir = (id: string, path: string): Promise<FileNode> =>
-  apiPost(`/workspaces/${id}/dir?path=${encodeURIComponent(path)}`);
+export const makeDir = (path: string): Promise<FileNode> =>
+  apiPost(`/workspace/dir?path=${encodeURIComponent(path)}`);
 
-export const deleteEntry = (id: string, path: string, recursive = false): Promise<void> =>
-  apiDelete(
-    `/workspaces/${id}/file?path=${encodeURIComponent(path)}&recursive=${recursive}`,
-  );
+export const deleteEntry = (path: string, recursive = false): Promise<void> =>
+  apiDelete(`/workspace/file?path=${encodeURIComponent(path)}&recursive=${recursive}`);
 
-export const renameEntry = (id: string, from: string, to: string): Promise<FileNode> =>
-  apiPost(`/workspaces/${id}/rename`, { from, to });
+export const renameEntry = (from: string, to: string): Promise<FileNode> =>
+  apiPost(`/workspace/rename`, { from, to });
 
-export const copyEntry = (id: string, from: string, to: string): Promise<FileNode> =>
-  apiPost(`/workspaces/${id}/copy`, { from, to });
+export const copyEntry = (from: string, to: string): Promise<FileNode> =>
+  apiPost(`/workspace/copy`, { from, to });
 
-export const downloadUrl = (id: string, path: string): string =>
-  `${API_BASE}/workspaces/${id}/download?path=${encodeURIComponent(path)}`;
+export const downloadUrl = (path: string): string =>
+  `${API_BASE}/workspace/download?path=${encodeURIComponent(path)}`;
 
 /**
  * Download autenticado (Bearer) via fetch + blob. `window.open(downloadUrl)` não
  * envia o header Authorization e retorna 401 no modo bearer-only.
  */
-export async function downloadFile(id: string, path: string): Promise<void> {
+export async function downloadFile(path: string): Promise<void> {
   const token = getAuthToken();
-  const res = await fetch(downloadUrl(id, path), {
+  const res = await fetch(downloadUrl(path), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) {
@@ -181,8 +140,8 @@ export interface GenerateFileBody {
 }
 
 /** Gera um arquivo sintético grande no backend (streaming em disco). */
-export const generateFile = (id: string, body: GenerateFileBody): Promise<FileNode> =>
-  apiPost(`/workspaces/${id}/generate`, {
+export const generateFile = (body: GenerateFileBody): Promise<FileNode> =>
+  apiPost(`/workspace/generate`, {
     path: body.path,
     rows: body.rows,
     seed: body.seed ?? null,
@@ -196,30 +155,19 @@ export interface WorkspaceExecution {
 
 /** Dispara execução de produção (Papermill) de um `.ipynb` do workspace. */
 export const executeWorkspaceNotebook = (
-  id: string,
   notebookPath: string,
   parameters: Record<string, unknown> = {},
 ): Promise<WorkspaceExecution> =>
-  apiPost(`/workspaces/${id}/execute`, {
-    notebook_path: notebookPath,
-    parameters,
-  });
+  apiPost(`/workspace/execute`, { notebook_path: notebookPath, parameters });
 
-export async function uploadFile(
-  id: string,
-  dir: string,
-  file: File,
-): Promise<FileNode> {
+export async function uploadFile(dir: string, file: File): Promise<FileNode> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(
-    `${API_BASE}/workspaces/${id}/upload?path=${encodeURIComponent(dir)}`,
-    {
-      method: "POST",
-      headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {},
-      body: form,
-    },
-  );
+  const res = await fetch(`${API_BASE}/workspace/upload?path=${encodeURIComponent(dir)}`, {
+    method: "POST",
+    headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {},
+    body: form,
+  });
   const text = await res.text();
   const parsed = text ? JSON.parse(text) : null;
   if (!res.ok) {

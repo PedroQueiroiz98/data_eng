@@ -20,7 +20,19 @@ from nbplatform.models.workflow import Workflow, WorkflowDependency, WorkflowTas
 from nbplatform.repositories.workflow_repository import WorkflowRepository
 from nbplatform.schemas.workflow import WorkflowEdgeInput, WorkflowTaskInput
 from nbplatform.services.workspace_fs_service import WorkspaceFsService
-from nbplatform.services.workspace_service import WorkspaceService
+from nbplatform.services.workspace_service import SINGLETON_WORKSPACE_ID
+
+
+def _workspace_fs() -> WorkspaceFsService:
+    settings = get_settings()
+    from pathlib import Path
+
+    return WorkspaceFsService(
+        Path(settings.workspace_dir),
+        max_upload_bytes=settings.workspace_max_upload_bytes,
+        max_nodes=settings.workspace_tree_max_nodes,
+        max_depth=settings.workspace_tree_max_depth,
+    )
 
 
 class WorkflowService:
@@ -130,6 +142,12 @@ class WorkflowService:
                 "referenciada por um Job."
             ) from exc
 
+        # O grafo passou na validação (todos os .ipynb existem) → se estava
+        # INVALID, o usuário consertou; volta a DRAFT.
+        if workflow.status == WorkflowStatus.INVALID:
+            workflow.status = WorkflowStatus.DRAFT
+            await self.session.flush()
+
         return await self.get(workflow_id)
 
     # ── helpers ────────────────────────────────────────────────────────────
@@ -140,10 +158,8 @@ class WorkflowService:
                 raise DomainValidationError(
                     f"Tipo de tarefa não suportado nesta fase: {task.type}."
                 )
-            if task.workspace_id is not None and task.notebook_path:
-                await self._validate_workspace_notebook(
-                    task.name, task.workspace_id, task.notebook_path
-                )
+            if task.notebook_path:
+                await self._validate_workspace_notebook(task.name, task.notebook_path)
             elif task.notebook_id is not None:
                 legacy_notebook_ids.add(task.notebook_id)  # workflow antigo
             else:
@@ -164,30 +180,92 @@ class WorkflowService:
                     f"Notebook(s) inexistente(s): {sorted(str(m) for m in missing)}."
                 )
 
-    async def _validate_workspace_notebook(
-        self, task_name: str, workspace_id: uuid.UUID, notebook_path: str
-    ) -> None:
+    async def _validate_workspace_notebook(self, task_name: str, notebook_path: str) -> None:
         if not is_ipynb(notebook_path):
             raise DomainValidationError(
                 f"Tarefa '{task_name}': o caminho deve apontar para um .ipynb."
             )
         try:
-            await WorkspaceService(self.session).get_active(workspace_id)
-        except NotFoundError as exc:
-            raise DomainValidationError(f"Tarefa '{task_name}': Workspace não encontrado.") from exc
-        settings = get_settings()
-        fs = WorkspaceFsService(
-            WorkspaceService(self.session).root_for(workspace_id),
-            max_upload_bytes=settings.workspace_max_upload_bytes,
-            max_nodes=settings.workspace_tree_max_nodes,
-            max_depth=settings.workspace_tree_max_depth,
-        )
-        try:
-            await fs.read_file(notebook_path)
+            await _workspace_fs().read_file(notebook_path)
         except NotFoundError as exc:
             raise DomainValidationError(
-                f"Tarefa '{task_name}': notebook não encontrado no Workspace ({notebook_path})."
+                f"Tarefa '{task_name}': notebook não encontrado em /root ({notebook_path})."
             ) from exc
+
+    # ── integridade de referências (rename/move/delete de notebook) ─────────
+    async def repath_tasks(self, old: str, new: str) -> int:
+        """Reescreve `notebook_path` das tasks afetadas por um rename/move.
+
+        Cobre o caminho exato e tudo sob ele (rename de pasta). Retorna quantas
+        linhas mudaram. Se um Workflow inválido voltar a ter todos os caminhos
+        resolvíveis, ele volta a DRAFT.
+        """
+        rows = list(
+            await self.session.scalars(
+                select(WorkflowTask).where(
+                    WorkflowTask.workspace_id == SINGLETON_WORKSPACE_ID,
+                    WorkflowTask.notebook_path.is_not(None),
+                )
+            )
+        )
+        changed = 0
+        touched_wf: set[uuid.UUID] = set()
+        for row in rows:
+            p = row.notebook_path or ""
+            if p == old:
+                row.notebook_path = new
+            elif p.startswith(f"{old}/"):
+                row.notebook_path = new + p[len(old) :]
+            else:
+                continue
+            changed += 1
+            touched_wf.add(row.workflow_id)
+        if changed:
+            await self.session.flush()
+            for wf_id in touched_wf:
+                await self._revalidate_workflow(wf_id)
+        return changed
+
+    async def invalidate_referencing(self, path: str) -> int:
+        """Marca como INVALID os Workflows cujas tasks apontam para `path` (ou sob ele)."""
+        rows = list(
+            await self.session.scalars(
+                select(WorkflowTask).where(
+                    WorkflowTask.workspace_id == SINGLETON_WORKSPACE_ID,
+                    WorkflowTask.notebook_path.is_not(None),
+                )
+            )
+        )
+        wf_ids = {
+            r.workflow_id
+            for r in rows
+            if (r.notebook_path == path) or (r.notebook_path or "").startswith(f"{path}/")
+        }
+        if not wf_ids:
+            return 0
+        for wf in await self.session.scalars(
+            select(Workflow).where(Workflow.id.in_(wf_ids))
+        ):
+            if wf.status != WorkflowStatus.ARCHIVED:
+                wf.status = WorkflowStatus.INVALID
+        await self.session.flush()
+        return len(wf_ids)
+
+    async def _revalidate_workflow(self, workflow_id: uuid.UUID) -> None:
+        """Se um Workflow INVALID tem todos os notebooks resolvíveis, volta a DRAFT."""
+        wf = await self.repo.get(workflow_id)
+        if wf is None or wf.status != WorkflowStatus.INVALID:
+            return
+        fs = _workspace_fs()
+        for row in await self.repo.tasks_for(workflow_id):
+            if not row.notebook_path:
+                continue
+            try:
+                await fs.read_file(row.notebook_path)
+            except NotFoundError:
+                return
+        wf.status = WorkflowStatus.DRAFT
+        await self.session.flush()
 
     async def _upsert_tasks(
         self,
@@ -219,7 +297,8 @@ def _apply(row: WorkflowTask, task: WorkflowTaskInput) -> None:
     row.name = task.name
     row.type = task.type
     row.notebook_id = task.notebook_id
-    row.workspace_id = task.workspace_id
+    # Single-workspace: uma task com `notebook_path` sempre aponta para `/root`.
+    row.workspace_id = SINGLETON_WORKSPACE_ID if task.notebook_path else task.workspace_id
     row.notebook_path = task.notebook_path
     row.parameters = task.parameters
     row.timeout_s = task.timeout_s

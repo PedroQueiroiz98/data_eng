@@ -49,9 +49,12 @@ async def _seed_admin() -> None:
     import contextlib
 
     from nbplatform.services.seed import ensure_admin_user
+    from nbplatform.services.workspace_service import ensure_singleton_workspace
 
     with contextlib.suppress(Exception):
         await ensure_admin_user()
+    with contextlib.suppress(Exception):
+        await ensure_singleton_workspace()
 
 
 @pytest_asyncio.fixture

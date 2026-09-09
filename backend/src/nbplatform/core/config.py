@@ -97,15 +97,24 @@ class Settings(BaseSettings):
     # Diretório de artefatos de execução (volume compartilhado worker/api).
     executions_dir: str = "/data/executions"
 
-    # ─── Workspace ───
-    # Raiz física de todos os Workspaces (volume compartilhado backend/worker).
-    # Em dev local aponte NBP_WORKSPACES_DIR para uma pasta real.
+    # ─── Workspace (único) ───
+    # Raiz física do Workspace único (volume compartilhado backend/worker).
+    # A UI mostra este diretório como `/root`. Começa vazio (sem skeleton).
+    workspace_dir: str = "/data/workspace"
+    # Legado — mantido só para migração/compat; o app usa `workspace_dir`.
     workspaces_dir: str = "/data/workspaces"
     workspace_max_upload_bytes: int = 104_857_600  # 100 MiB
     workspace_tree_max_nodes: int = 5_000
     workspace_tree_max_depth: int = 12
     # Preview de dados (.csv/.parquet) no Data Viewer.
     workspace_data_max_rows: int = 500
+    # Watcher de filesystem → eventos em tempo real (canal /ws/workspace).
+    workspace_events_enabled: bool = True
+    workspace_watch_debounce_ms: int = 200
+    workspace_event_buffer: int = 2000
+    redis_workspace_event_channel: str = "nbp:events:workspace"
+    redis_workspace_seq_key: str = "nbp:workspace:seq"
+    redis_workspace_log_key: str = "nbp:workspace:log"
 
     # ─── Kernel interativo (processo `kernel-worker`) ───
     # Interativo = kernel; produção (Jobs) continua sendo Papermill.

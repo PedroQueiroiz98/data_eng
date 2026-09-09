@@ -8,7 +8,6 @@ import { Button, useToast } from "@/ui";
 import { DownloadIcon, SaveIcon, SpinnerIcon } from "@/ui/icons";
 
 interface Props {
-  workspaceId: string;
   path: string;
   onDirtyChange: (path: string, dirty: boolean) => void;
   active?: boolean;
@@ -39,11 +38,11 @@ function langFor(path: string): string {
   return LANG_BY_EXT[ext] ?? "plaintext";
 }
 
-export function FilePreview({ workspaceId, path, onDirtyChange, active = true }: Props) {
+export function FilePreview({ path, onDirtyChange, active = true }: Props) {
   const { theme } = useTheme();
   const toast = useToast();
-  const { data, isLoading, isError, error } = useWorkspaceFile(workspaceId, path);
-  const save = useWriteFile(workspaceId);
+  const { data, isLoading, isError, error } = useWorkspaceFile(path);
+  const save = useWriteFile();
 
   const [draft, setDraft] = useState<string | null>(null);
   const original = useMemo(() => {
@@ -114,7 +113,7 @@ export function FilePreview({ workspaceId, path, onDirtyChange, active = true }:
           size="sm"
           icon={<DownloadIcon className="h-4 w-4" />}
           onClick={() => {
-            void downloadFile(workspaceId, path).catch((e) =>
+            void downloadFile(path).catch((e) =>
               toast.error((e as Error).message),
             );
           }}
@@ -141,7 +140,7 @@ export function FilePreview({ workspaceId, path, onDirtyChange, active = true }:
             variant="text"
             icon={<DownloadIcon className="h-4 w-4" />}
             onClick={() => {
-              void downloadFile(workspaceId, path).catch((e) =>
+              void downloadFile(path).catch((e) =>
                 toast.error((e as Error).message),
               );
             }}

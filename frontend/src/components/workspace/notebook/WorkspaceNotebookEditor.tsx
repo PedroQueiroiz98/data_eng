@@ -66,8 +66,8 @@ export function WorkspaceNotebookEditor({
   const toast = useToast();
   const navigate = useNavigate();
   const [wfDialog, setWfDialog] = useState(false);
-  const file = useWorkspaceFile(workspaceId, path);
-  const write = useWriteFile(workspaceId);
+  const file = useWorkspaceFile(path);
+  const write = useWriteFile();
   const autosave = useWorkspaceStore((s) => s.autosave);
   const setPanelTab = useWorkspaceStore((s) => s.setPanelTab);
 
@@ -92,7 +92,7 @@ export function WorkspaceNotebookEditor({
   } | null>(null);
   const [showProblems, setShowProblems] = useState(false);
   const diagnosticsEnabled = useEditorConfig((s) => s.config.editor.diagnostics);
-  const tree = useWorkspaceTree(workspaceId);
+  const tree = useWorkspaceTree();
 
   const lspCtx = useCallback(
     () => ({ workspaceId, notebookPath: path }),
@@ -348,7 +348,41 @@ export function WorkspaceNotebookEditor({
       window.removeEventListener("nbp:workspace-command", onCmd as EventListener);
   }, [active, runAllCells, kernel, save]);
 
+  // filesystem mudou por fora (watcher): reagir se for ESTE notebook
+  const [extGone, setExtGone] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    const onFs = (e: Event): void => {
+      const d = (e as CustomEvent<{ op: string; path: string }>).detail;
+      if (!d || d.path !== path) return;
+      if (d.op === "deleted") setExtGone(true);
+      else if (d.op === "updated" && !dirtyRef.current) void file.refetch();
+    };
+    window.addEventListener("nbp:fs-change", onFs as EventListener);
+    return () => window.removeEventListener("nbp:fs-change", onFs as EventListener);
+  }, [path, file]);
+
   // ── render ────────────────────────────────────────────────────────────────
+  if (extGone) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-danger">
+          Este notebook foi removido de <span className="font-mono">/root</span> por
+          outra ação. Não é possível salvar sobre um arquivo inexistente.
+        </p>
+        <Button
+          size="sm"
+          onClick={() => {
+            setExtGone(false);
+            void file.refetch();
+          }}
+        >
+          Tentar recarregar
+        </Button>
+      </div>
+    );
+  }
   if (file.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-fg-faint">
@@ -558,7 +592,6 @@ export function WorkspaceNotebookEditor({
 
       <CreateWorkflowDialog
         open={wfDialog}
-        workspaceId={workspaceId}
         notebookPath={path}
         onClose={() => setWfDialog(false)}
         onCreated={(wid) => navigate(`/workflows/${wid}`)}

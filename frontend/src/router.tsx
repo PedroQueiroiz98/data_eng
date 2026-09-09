@@ -10,7 +10,6 @@ import { Login } from "@/pages/Login";
 import { NotificationsPage } from "@/pages/NotificationsPage";
 import { Schedules } from "@/pages/Schedules";
 import { Workspace } from "@/pages/Workspace";
-import { Workspaces } from "@/pages/Workspaces";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { Secrets } from "@/pages/Secrets";
 import { Settings } from "@/pages/Settings";
@@ -30,7 +29,6 @@ export const router = createBrowserRouter(
           children: [
             { index: true, element: <Navigate to="/dashboard" replace /> },
             { path: "dashboard", element: <Dashboard /> },
-            { path: "workspaces", element: <Workspaces /> },
             { path: "workflows", element: <Workflows /> },
             { path: "workflows/:id", element: <WorkflowEditor /> },
             { path: "jobs", element: <Jobs /> },
@@ -47,7 +45,12 @@ export const router = createBrowserRouter(
         {
           path: "/",
           element: <WorkspaceLayout />,
-          children: [{ path: "workspaces/:id", element: <Workspace /> }],
+          children: [
+            { path: "workspace", element: <Workspace /> },
+            // compat: links antigos /workspaces ou /workspaces/:id → /workspace
+            { path: "workspaces", element: <Navigate to="/workspace" replace /> },
+            { path: "workspaces/:id", element: <Navigate to="/workspace" replace /> },
+          ],
         },
       ],
     },

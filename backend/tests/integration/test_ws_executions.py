@@ -31,9 +31,7 @@ def tc() -> TestClient:
 
 
 def _make_execution(tc: TestClient) -> str:
-    ws = tc.post("/api/workspaces", json={"name": f"ws-{time.time()}"})
-    assert ws.status_code == 201, ws.text
-    ws_id = ws.json()["id"]
+    nb_path = f"nb-{time.time()}.ipynb"
     skeleton = {
         "nbformat": 4,
         "nbformat_minor": 5,
@@ -48,16 +46,9 @@ def _make_execution(tc: TestClient) -> str:
             }
         ],
     }
-    w = tc.put(
-        f"/api/workspaces/{ws_id}/file",
-        params={"path": "notebooks/ws.ipynb"},
-        json={"notebook": skeleton},
-    )
+    w = tc.put("/api/workspace/file", params={"path": nb_path}, json={"notebook": skeleton})
     assert w.status_code == 200, w.text
-    ex = tc.post(
-        f"/api/workspaces/{ws_id}/execute",
-        json={"notebook_path": "notebooks/ws.ipynb"},
-    )
+    ex = tc.post("/api/workspace/execute", json={"notebook_path": nb_path})
     assert ex.status_code == 202, ex.text
     return ex.json()["id"]
 

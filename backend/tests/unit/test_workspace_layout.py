@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from nbplatform.domain.workspace_layout import (
-    GITIGNORE_TEXT,
     SKELETON_DIRS,
     build_workspace_json,
     dump_workspace_json,
@@ -16,11 +15,9 @@ def test_slugify() -> None:
     assert slugify("A/B\\C") == "a-b-c"
 
 
-def test_skeleton_and_gitignore() -> None:
-    assert "notebooks" in SKELETON_DIRS
-    assert ".workspace" in SKELETON_DIRS
-    for pat in ("executions/", "__pycache__/", "*.pyc", ".pydeps/"):
-        assert pat in GITIGNORE_TEXT
+def test_no_skeleton_dirs() -> None:
+    # Modo single-workspace: a raiz `/root` começa VAZIA (sem pastas padrão).
+    assert SKELETON_DIRS == ()
 
 
 def test_workspace_json_roundtrip() -> None:

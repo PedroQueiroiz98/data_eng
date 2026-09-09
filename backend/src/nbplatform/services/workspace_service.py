@@ -15,10 +15,9 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from nbplatform.core.config import get_settings
 from nbplatform.core.errors import ConflictError, DomainValidationError, NotFoundError
+from nbplatform.db.session import session_scope
 from nbplatform.domain.enums import ExecutionStatus, WorkspaceRole
 from nbplatform.domain.workspace_layout import (
-    GITIGNORE_TEXT,
-    SKELETON_DIRS,
     build_workspace_json,
     dump_workspace_json,
     slugify,
@@ -30,6 +29,10 @@ from nbplatform.repositories.workspace_repository import WorkspaceRepository
 
 _SLUG_ATTEMPTS = 50
 
+# Modo single-workspace: um único Workspace com UUID fixo. A raiz física é
+# `settings.workspace_dir` e a UI a mostra como `/root`.
+SINGLETON_WORKSPACE_ID = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
+
 
 class WorkspaceService:
     def __init__(self, session: AsyncSession) -> None:
@@ -37,8 +40,48 @@ class WorkspaceService:
         self.repo = WorkspaceRepository(session)
         self.settings = get_settings()
 
-    def root_for(self, workspace_id: uuid.UUID) -> Path:
-        return Path(self.settings.workspaces_dir) / str(workspace_id)
+    @property
+    def root_dir(self) -> Path:
+        return Path(self.settings.workspace_dir)
+
+    def root_for(self, workspace_id: uuid.UUID | None = None) -> Path:
+        # Single-workspace: a raiz é sempre `workspace_dir` (o id é ignorado).
+        return self.root_dir
+
+    # ── single workspace ────────────────────────────────────────────────────
+    async def get_singleton(self) -> Workspace:
+        ws = await self.repo.get(SINGLETON_WORKSPACE_ID)
+        if ws is None:
+            ws = await self._create_singleton()
+        return ws
+
+    async def get_singleton_active(self) -> Workspace:
+        return await self.get_singleton()
+
+    async def _create_singleton(self) -> Workspace:
+        root = self.root_dir
+        ws = Workspace(
+            id=SINGLETON_WORKSPACE_ID,
+            name="Workspace",
+            slug="root",
+            description=None,
+            owner_id=None,
+            root_path=str(root),
+            is_active=True,
+        )
+        try:
+            await self.repo.add(ws)
+        except IntegrityError:
+            await self.session.rollback()
+            got = await self.repo.get(SINGLETON_WORKSPACE_ID)
+            if got is not None:
+                return got
+            raise
+        set_committed_value(ws, "git_repository", None)
+        set_committed_value(ws, "members", [])
+        await self.session.flush()
+        await asyncio.to_thread(_provision_root, root, ws.created_at.isoformat())
+        return ws
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
     async def create(
@@ -221,18 +264,54 @@ class WorkspaceService:
         return f"{base}-{uuid.uuid4().hex[:8]}"
 
 
+def _provision_root(root: Path, created_at: str) -> None:
+    """Cria a raiz do Workspace único VAZIA (sem skeleton, sem .gitignore).
+
+    Só o `.workspace/workspace.json` interno é escrito (oculto no File Explorer).
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".workspace").mkdir(parents=True, exist_ok=True)
+    meta = build_workspace_json(
+        workspace_id=str(SINGLETON_WORKSPACE_ID), name="Workspace", slug="root",
+        created_at=created_at,
+    )
+    (root / ".workspace" / "workspace.json").write_text(
+        dump_workspace_json(meta), encoding="utf-8"
+    )
+
+
 def _provision_tree(
     root: Path, *, workspace_id: str, name: str, slug: str, created_at: str
 ) -> None:
-    for d in SKELETON_DIRS:
-        (root / d).mkdir(parents=True, exist_ok=True)
-    (root / ".gitignore").write_text(GITIGNORE_TEXT, encoding="utf-8")
-    meta = build_workspace_json(
-        workspace_id=workspace_id, name=name, slug=slug, created_at=created_at
-    )
-    (root / ".workspace" / "workspace.json").write_text(dump_workspace_json(meta), encoding="utf-8")
+    # Legado (rota de criação de Workspace foi removida no modo single-workspace);
+    # mantido só por compat. NÃO cria mais skeleton — raiz começa vazia.
+    _provision_root(root, created_at)
 
 
 def _rmtree_silent(path: Path) -> None:
     with contextlib.suppress(FileNotFoundError):
         shutil.rmtree(path)
+
+
+async def ensure_singleton_workspace() -> None:
+    """Startup: garante que o Workspace único exista (idempotente)."""
+    settings = get_settings()
+    root = Path(settings.workspace_dir)
+    await asyncio.to_thread(_ensure_root_dir, root)
+    async with session_scope() as session:
+        await WorkspaceService(session).get_singleton()
+
+
+def _ensure_root_dir(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    internal = root / ".workspace"
+    internal.mkdir(parents=True, exist_ok=True)
+    meta_file = internal / "workspace.json"
+    if not meta_file.exists():
+        meta = build_workspace_json(
+            workspace_id=str(SINGLETON_WORKSPACE_ID),
+            name="Workspace",
+            slug="root",
+            created_at="",
+        )
+        meta_file.write_text(dump_workspace_json(meta), encoding="utf-8")

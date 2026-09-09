@@ -11,18 +11,9 @@ import re
 import unicodedata
 from typing import Any
 
-# Ordem estável — usada no provisionamento e nos testes.
-SKELETON_DIRS: tuple[str, ...] = (
-    "notebooks",
-    "scripts",
-    "data",
-    "input",
-    "output",
-    "configs",
-    "artifacts",
-    "executions",
-    ".workspace",
-)
+# Modo single-workspace: a raiz `/root` começa VAZIA. Nenhuma pasta padrão é
+# criada — o usuário organiza a estrutura livremente. (Antes: notebooks/, data/…)
+SKELETON_DIRS: tuple[str, ...] = ()
 
 GITIGNORE_TEXT = "\n".join(
     [

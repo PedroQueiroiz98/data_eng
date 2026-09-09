@@ -330,3 +330,96 @@ export function openJobSocket(
   connect();
   return stop;
 }
+
+// ─── Workspace filesystem (canal /ws/workspace) ────────────────────────────
+
+export interface FsChange {
+  op: "created" | "updated" | "deleted";
+  path: string;
+  is_dir: boolean;
+}
+
+export interface WorkspaceSnapshot {
+  type: "snapshot";
+  tree: import("@/lib/workspace").FileNode;
+  seq: number;
+}
+
+export interface FsBatchEvent {
+  type: "fs.batch";
+  changes: FsChange[];
+  seq: number;
+  ts: number;
+}
+
+export interface WorkspaceSocketHandlers {
+  onSnapshot?: (s: WorkspaceSnapshot) => void;
+  onBatch?: (e: FsBatchEvent) => void;
+  onOpen?: () => void;
+  onDisconnect?: () => void;
+}
+
+/**
+ * Abre o WebSocket de eventos de filesystem do Workspace único, com reconexão
+ * e retomada por `after_seq`. Retorna uma função para encerrar.
+ */
+export function openWorkspaceSocket(
+  handlers: WorkspaceSocketHandlers,
+  deps: ExecutionSocketDeps = {},
+): () => void {
+  const WS = deps.WebSocketImpl ?? WebSocket;
+  const baseUrl = deps.baseUrl ?? import.meta.env.VITE_WS_BASE_URL ?? "/ws";
+  const maxDelay = deps.maxDelayMs ?? 15_000;
+
+  let socket: WebSocket | null = null;
+  let stopped = false;
+  let lastSeq = 0;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const stop = (): void => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    socket?.close();
+  };
+
+  function connect(): void {
+    if (stopped) return;
+    const proto =
+      typeof location !== "undefined" && location.protocol === "https:" ? "wss" : "ws";
+    const loc = typeof location !== "undefined" ? location.host : "localhost";
+    const url = baseUrl.startsWith("ws")
+      ? `${baseUrl}/workspace?after_seq=${lastSeq}${tokenParam()}`
+      : `${proto}://${loc}${baseUrl}/workspace?after_seq=${lastSeq}${tokenParam()}`;
+    socket = new WS(url);
+
+    socket.onopen = () => {
+      attempt = 0;
+      handlers.onOpen?.();
+    };
+    socket.onmessage = (ev: MessageEvent) => {
+      let evt: { type: string; seq?: number; [k: string]: unknown };
+      try {
+        evt = JSON.parse(ev.data as string);
+      } catch {
+        return;
+      }
+      if (typeof evt.seq === "number") lastSeq = Math.max(lastSeq, evt.seq);
+      if (evt.type === "snapshot") {
+        handlers.onSnapshot?.(evt as unknown as WorkspaceSnapshot);
+      } else if (evt.type === "fs.batch") {
+        handlers.onBatch?.(evt as unknown as FsBatchEvent);
+      }
+    };
+    socket.onclose = () => {
+      if (stopped) return;
+      handlers.onDisconnect?.();
+      attempt += 1;
+      timer = setTimeout(connect, Math.min(1000 * 2 ** attempt, maxDelay));
+    };
+    socket.onerror = () => socket?.close();
+  }
+
+  connect();
+  return stop;
+}
