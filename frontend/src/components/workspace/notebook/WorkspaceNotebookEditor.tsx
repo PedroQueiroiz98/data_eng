@@ -178,6 +178,8 @@ export function WorkspaceNotebookEditor({
   }, [setPanelTab]);
 
   const kernel = useKernel(workspaceId, path, onKernelEvent);
+  const kernelStatusRef = useRef(kernel.status);
+  kernelStatusRef.current = kernel.status;
 
   useEffect(() => {
     if (active) {
@@ -368,17 +370,32 @@ export function WorkspaceNotebookEditor({
     [kernel],
   );
 
+  const cancelRequested = useRef(false);
+
   const runAllCells = useCallback(async () => {
+    cancelRequested.current = false;
     const codeCells = stateRef.current.cells.filter((c) => c.cell_type === "code");
     setRunAll({ done: 0, total: codeCells.length });
     setPanelTab("execution");
     for (let i = 0; i < codeCells.length; i++) {
+      if (cancelRequested.current) break;
       const res = await runCell(codeCells[i]!.id);
       setRunAll({ done: i + 1, total: codeCells.length });
-      if (res === "error") break;
+      if (res === "error" || cancelRequested.current) break;
     }
     setRunAll(null);
   }, [runCell, setPanelTab]);
+
+  const cancelRun = useCallback(() => {
+    cancelRequested.current = true;
+    kernel.interrupt();
+    // SIGINT (interrupt) só para a chamada Python corrente; se em ~5s o kernel não
+    // voltar (célula travada numa chamada nativa), reinicia o processo para liberar
+    // os recursos de fato.
+    window.setTimeout(() => {
+      if (cancelRequested.current && kernelStatusRef.current === "busy") kernel.restart();
+    }, 5000);
+  }, [kernel]);
 
   const focusOrFirst = useCallback(() => {
     const cells = stateRef.current.cells;
@@ -518,29 +535,30 @@ export function WorkspaceNotebookEditor({
           Markdown
         </Button>
         <span className="mx-1 h-4 w-px bg-surface-border" />
-        <Button
-          size="sm"
-          icon={
-            runAll ? (
-              <SpinnerIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <RunIcon className="h-4 w-4" />
-            )
-          }
-          disabled={kBusy && !runAll}
-          onClick={() => void runAllCells()}
-        >
-          {runAll ? `Executando ${runAll.done}/${runAll.total}` : "Executar tudo"}
-        </Button>
-        <Button
-          size="sm"
-          variant="text"
-          icon={<StopIcon className="h-4 w-4" />}
-          disabled={kernel.status !== "busy"}
-          onClick={kernel.interrupt}
-        >
-          Interromper
-        </Button>
+        {kBusy ? (
+          <Button
+            size="sm"
+            variant="danger"
+            icon={
+              runAll ? (
+                <SpinnerIcon className="h-4 w-4 animate-spin" />
+              ) : (
+                <StopIcon className="h-4 w-4" />
+              )
+            }
+            onClick={cancelRun}
+          >
+            {runAll ? `Cancelar Execução (${runAll.done}/${runAll.total})` : "Cancelar Execução"}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            icon={<RunIcon className="h-4 w-4" />}
+            onClick={() => void runAllCells()}
+          >
+            Executar tudo
+          </Button>
+        )}
         <Button
           size="sm"
           variant="text"

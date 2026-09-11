@@ -82,7 +82,7 @@ async def run_in_docker(
     output_path: str,  # noqa: ARG001
     params_path: str,  # noqa: ARG001
     env: dict[str, str],
-    timeout_s: float,
+    timeout_s: float | None,
     on_line: LineHandler,
     cancel_event: asyncio.Event | None = None,
 ) -> PapermillResult:

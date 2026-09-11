@@ -22,7 +22,7 @@ async def run_sandboxed(
     output_path: str,
     params_path: str,
     env: dict[str, str],
-    timeout_s: float,
+    timeout_s: float | None,
     on_line: LineHandler,
     cancel_event: asyncio.Event | None = None,
     cwd: str | None = None,

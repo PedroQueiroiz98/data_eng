@@ -7,7 +7,7 @@ def test_defaults_are_sane() -> None:
     s = Settings(_env_file=None)
     assert s.app_env in {"dev", "test", "prod"}
     assert s.max_concurrent_executions >= 1
-    assert s.execution_timeout_s > 0
+    assert s.execution_timeout_s is None  # sem timeout por padrão
     assert s.worker_lease_timeout_s >= s.worker_heartbeat_interval_s
 
 

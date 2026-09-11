@@ -66,7 +66,7 @@ class ExecutionManager:
         input_path.write_text(json.dumps(_ensure_language(content)), encoding="utf-8")
         params_path.write_text(json.dumps(await self._parameters(exec_uuid)), encoding="utf-8")
 
-        env = await self._build_env(pydeps_dir, workspace_root=workspace_root)
+        env = await self._build_env(pydeps_dir, workspace_root=workspace_root, exec_cwd=exec_cwd)
 
         if not await self._install_dependencies(exec_uuid, attempt, content, pydeps_dir):
             msg = "falha ao instalar dependências declaradas (pip)"
@@ -87,7 +87,7 @@ class ExecutionManager:
                 output_path=str(output_path),
                 params_path=str(params_path),
                 env=env,
-                timeout_s=float(timeout_s or self.settings.execution_timeout_s),
+                timeout_s=_effective_timeout_s(timeout_s, self.settings.execution_timeout_s),
                 on_line=lambda line: self._emit_log(exec_uuid, attempt, line),
                 cancel_event=cancel_event,
                 cwd=exec_cwd,
@@ -240,7 +240,11 @@ class ExecutionManager:
         return masked
 
     async def _build_env(
-        self, pydeps_dir: Path, *, workspace_root: str | None = None
+        self,
+        pydeps_dir: Path,
+        *,
+        workspace_root: str | None = None,
+        exec_cwd: str | None = None,
     ) -> dict[str, str]:
         """Variáveis (visíveis) + secrets (cifrados) + alvo pip → env vars da execução."""
         async with session_scope() as session:
@@ -250,33 +254,45 @@ class ExecutionManager:
         merged: dict[str, str] = {}
         merged.update({k: str(v) for k, v in variables.items()})
         merged.update({k: str(v) for k, v in secrets.items()})
-        merged.update(self._pip_env(pydeps_dir))
+        merged.update(self._pip_env(pydeps_dir, exec_cwd=exec_cwd))
         if workspace_root:
             # liga o pacote `workspace_sdk` dentro do notebook (workspace.read_csv(...))
             merged["WORKSPACE_ROOT"] = workspace_root
         return merged
 
-    def _pip_env(self, pydeps_dir: Path) -> dict[str, str]:
+    def _pip_env(self, pydeps_dir: Path, *, exec_cwd: str | None = None) -> dict[str, str]:
         """Isola instalações pip da execução num diretório próprio.
 
         `PIP_TARGET` faz `%pip install` (e `!pip`) escreverem ali; `PYTHONPATH`
         deixa os pacotes importáveis. No sandbox Docker o workdir é montado em
         `/work`, então os caminhos são reescritos para dentro do container.
+
+        `exec_cwd` (a pasta do próprio notebook, ex. `etl/`) é sempre prependido ao
+        `PYTHONPATH` de forma explícita — módulos locais do usuário ao lado do notebook
+        (ex. `etl/elt_mssql_pg`) precisam ficar importáveis de forma determinística, sem
+        depender do comportamento implícito de `cwd` do processo/kernel, que muda conforme
+        o container é recriado ou reutilizado.
         """
-        if not self.settings.execution_pip_install:
-            return {}
-        if self.settings.execution_sandbox == "docker":
-            deps_path = "/work/.pydeps"
-        else:
-            deps_path = str(pydeps_dir)
+        pip_enabled = self.settings.execution_pip_install
+        deps_path = (
+            ("/work/.pydeps" if self.settings.execution_sandbox == "docker" else str(pydeps_dir))
+            if pip_enabled
+            else None
+        )
+
         prev = os.environ.get("PYTHONPATH", "")
-        pythonpath = os.pathsep.join([deps_path, prev]) if prev else deps_path
-        env = {
-            "PIP_TARGET": deps_path,
-            "PIP_NO_INPUT": "1",
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PYTHONPATH": pythonpath,
-        }
+        parts = [p for p in (deps_path, exec_cwd) if p]
+        if prev:
+            parts.append(prev)
+        env: dict[str, str] = {}
+        if parts:
+            env["PYTHONPATH"] = os.pathsep.join(parts)
+        if deps_path is None:
+            return env
+
+        env["PIP_TARGET"] = deps_path
+        env["PIP_NO_INPUT"] = "1"
+        env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
         if self.settings.execution_pip_index_url:
             env["PIP_INDEX_URL"] = self.settings.execution_pip_index_url
         return env
@@ -384,6 +400,12 @@ class ExecutionManager:
     async def _publish(self, exec_uuid: uuid.UUID, event: dict[str, Any]) -> None:
         with contextlib.suppress(Exception):
             await publish_execution_event(self.redis, str(exec_uuid), event)
+
+
+def _effective_timeout_s(override_s: int | None, default_s: int | None) -> float | None:
+    """`None` = sem limite (timeout desativado); nunca coage `None` para float."""
+    value = override_s if override_s is not None else default_s
+    return float(value) if value is not None else None
 
 
 def _ensure_language(content: dict[str, Any]) -> dict[str, Any]:

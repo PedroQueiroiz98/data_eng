@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
+        # env vazio ("") vira None em campos Optional — usado por EXECUTION_TIMEOUT_S para
+        # permitir desativar o timeout via `.env`/compose sem remover a variável.
+        env_parse_none_str="",
     )
 
     app_env: Literal["dev", "test", "prod"] = "dev"
@@ -87,7 +90,8 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = 5
     max_concurrent_executions: int = 5
 
-    execution_timeout_s: int = 1800
+    # `None`/vazio = sem limite de tempo (notebooks de pipeline longa não são abortados).
+    execution_timeout_s: int | None = None
     worker_heartbeat_interval_s: int = 10
     worker_lease_timeout_s: int = 60
     recovery_interval_s: int = 30

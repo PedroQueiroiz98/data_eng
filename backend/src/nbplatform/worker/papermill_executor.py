@@ -37,20 +37,21 @@ async def run_papermill(
     input_path: str,
     output_path: str,
     params_path: str,
-    timeout_s: float,
+    timeout_s: float | None,
     on_line: LineHandler,
     cancel_event: asyncio.Event | None = None,
     env: dict[str, str] | None = None,
     cwd: str | None = None,
 ) -> PapermillResult:
     child_env = {**os.environ, **(env or {})}
+    runner_args = [input_path, output_path, params_path]
+    if cwd:
+        runner_args.append(cwd)
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
         "nbplatform.worker.papermill_runner",
-        input_path,
-        output_path,
-        params_path,
+        *runner_args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         env=child_env,

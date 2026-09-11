@@ -1,6 +1,6 @@
 """Subprocesso que executa um notebook via Papermill.
 
-Uso: python -m nbplatform.worker.papermill_runner <input.ipynb> <output.ipynb> <params.json>
+Uso: python -m nbplatform.worker.papermill_runner <input.ipynb> <output.ipynb> <params.json> [cwd]
 
 Contrato:
 - stdout: linhas de log (a mãe encaminha para execution_logs + Redis).
@@ -31,11 +31,12 @@ def _configure_logging() -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
+    if len(argv) not in (3, 4):
         print("PAPERMILL_ERROR::uso inválido do runner", flush=True)
         return EXIT_UNEXPECTED
 
-    input_path, output_path, params_path = argv
+    input_path, output_path, params_path = argv[:3]
+    cwd = argv[3] if len(argv) == 4 else None
     _configure_logging()
 
     try:
@@ -56,9 +57,11 @@ def main(argv: list[str]) -> int:
             output_path,
             parameters=parameters,
             kernel_name=kernel_name,
+            cwd=cwd,  # ancora o kernel na pasta do notebook (módulos locais, ex. etl/*)
             log_output=True,  # roteia stdout/stderr das células para o logger (stdout)
             progress_bar=False,
             request_save_on_cell_execute=True,
+            execution_timeout=None,  # sem limite por célula — pipelines longas não são abortadas
         )
     except PapermillExecutionError as exc:
         print(f"PAPERMILL_ERROR::{exc.ename}: {exc.evalue}", flush=True)
