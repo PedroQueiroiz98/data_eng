@@ -33,6 +33,7 @@ def _session() -> KernelSession:
     return KernelSession(
         "sid",
         cwd="/tmp",
+        ws_root="/tmp",
         env={},
         secret_values=[],
         startup_timeout=1.0,

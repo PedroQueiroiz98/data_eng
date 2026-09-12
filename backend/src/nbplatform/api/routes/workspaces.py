@@ -27,11 +27,20 @@ from nbplatform.api.deps import (
     WorkspaceViewer,
 )
 from nbplatform.core.config import get_settings
-from nbplatform.core.errors import DomainValidationError
+from nbplatform.core.errors import (
+    ConflictError,
+    DomainValidationError,
+    ForbiddenError,
+    NotFoundError,
+)
 from nbplatform.domain.workspace_paths import is_ipynb
 from nbplatform.queue.execution_queue import ExecutionQueue
 from nbplatform.schemas.execution import ExecutionRead
 from nbplatform.schemas.workspace import (
+    BatchDeleteRequest,
+    BatchItemResult,
+    BatchMoveRequest,
+    BatchResult,
     CopyRequest,
     DataPreviewRead,
     FileContentRead,
@@ -281,6 +290,73 @@ async def copy_entry(
     )
     _log_op("DUPLICATE", user_id=access.user.id, src=payload.src, dst=payload.dst)
     return FileNode.model_validate(node, from_attributes=True)
+
+
+@router.post("/batch/delete", response_model=BatchResult)
+async def batch_delete_entries(
+    payload: BatchDeleteRequest,
+    session: SessionDep,
+    access: WorkspaceEditor,
+) -> BatchResult:
+    fs = _fs(access.user.id)
+    results: list[BatchItemResult] = []
+    for path in payload.paths:
+        try:
+            await fs.delete(path, recursive=payload.recursive)
+        except (NotFoundError, ConflictError, ForbiddenError, DomainValidationError) as exc:
+            results.append(BatchItemResult(path=path, ok=False, error=str(exc)))
+            continue
+        try:
+            async with session.begin_nested():
+                await WorkflowService(session).invalidate_referencing(
+                    physical_path(access.user.id, path), owner_id=access.user.id
+                )
+                await _audit(session, access.user.id, "WORKSPACE_FS_DELETE", path=path)
+        except Exception:  # noqa: BLE001
+            logger.exception("side-effect de auditoria/workflow falhou ao excluir %s", path)
+        _log_op("DELETE", user_id=access.user.id, path=path)
+        results.append(BatchItemResult(path=path, ok=True))
+    return BatchResult(results=results)
+
+
+@router.post("/batch/move", response_model=BatchResult)
+async def batch_move_entries(
+    payload: BatchMoveRequest,
+    session: SessionDep,
+    access: WorkspaceEditor,
+) -> BatchResult:
+    fs = _fs(access.user.id)
+    results: list[BatchItemResult] = []
+    for item in payload.items:
+        try:
+            node = await fs.rename(item.src, item.dst)
+        except (NotFoundError, ConflictError, ForbiddenError, DomainValidationError) as exc:
+            results.append(BatchItemResult(path=item.src, ok=False, error=str(exc)))
+            continue
+        try:
+            async with session.begin_nested():
+                repathed = await WorkflowService(session).repath_tasks(
+                    physical_path(access.user.id, item.src),
+                    physical_path(access.user.id, item.dst),
+                    owner_id=access.user.id,
+                )
+                await _audit(
+                    session, access.user.id, "WORKSPACE_FS_RENAME", src=item.src, dst=item.dst
+                )
+        except Exception:  # noqa: BLE001
+            repathed = None
+            logger.exception(
+                "side-effect de auditoria/workflow falhou ao mover %s -> %s", item.src, item.dst
+            )
+        _log_op(
+            "RENAME",
+            user_id=access.user.id,
+            old_path=item.src,
+            new_path=item.dst,
+            workflow_tasks_repathed=str(repathed) if repathed is not None else None,
+        )
+        results.append(BatchItemResult(path=item.src, ok=True, new_path=node.path))
+    return BatchResult(results=results)
 
 
 @router.post("/upload", response_model=FileNode, status_code=status.HTTP_201_CREATED)

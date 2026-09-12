@@ -149,8 +149,21 @@ export function WorkspaceNotebookEditor({
   }, [dirty, path, onDirtyChange]);
 
   // ── kernel ────────────────────────────────────────────────────────────────
+  const secretsRestartPending = useRef(false);
   const onKernelEvent = useCallback((e: KernelEvent) => {
     useWorkspaceRuntime.getState().ingest(e);
+    if (e.type === "kernel.status") {
+      if (e.reason === "secrets_updated" && e.status === "restarting") {
+        secretsRestartPending.current = true;
+        toast.show("Secrets atualizados — reiniciando o kernel…", "info");
+      } else if (secretsRestartPending.current && e.status === "idle") {
+        secretsRestartPending.current = false;
+        toast.success("Kernel reiniciado com os secrets atualizados.");
+      } else if (secretsRestartPending.current && e.status === "dead") {
+        secretsRestartPending.current = false;
+        toast.error(`Kernel morreu ao aplicar secrets: ${e.reason ?? "erro desconhecido"}`);
+      }
+    }
     if (!e.cell_id) return;
     if (e.type === "cell.started") {
       dispatch({ type: "runStart", id: e.cell_id });

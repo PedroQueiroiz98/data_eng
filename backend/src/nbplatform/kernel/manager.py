@@ -20,7 +20,7 @@ from redis.asyncio import Redis
 from nbplatform.core.config import get_settings
 from nbplatform.kernel.env import resolve_workspace_env
 from nbplatform.kernel.session import KernelSession
-from nbplatform.ws.events import publish_kernel_event
+from nbplatform.ws.events import publish_kernel_event, subscribe_config_events
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ class KernelSessionManager:
             sess = KernelSession(
                 session_id,
                 cwd=str(cwd),
+                ws_root=str(ws_root),
                 env=env,
                 secret_values=secret_values,
                 startup_timeout=self.settings.kernel_startup_timeout_s,
@@ -227,6 +228,7 @@ class KernelSessionManager:
     # ── loop principal ───────────────────────────────────────────────────────
     async def run(self, stop: asyncio.Event) -> None:
         reaper = asyncio.create_task(self._reaper_loop(stop))
+        config_listener = asyncio.create_task(self._config_listener_loop(stop))
         logger.info("kernel-worker consumindo %s", self.settings.redis_kernel_ops)
         try:
             while not stop.is_set():
@@ -243,11 +245,44 @@ class KernelSessionManager:
                 task.add_done_callback(self._tasks.discard)
         finally:
             reaper.cancel()
+            config_listener.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await reaper
+            with contextlib.suppress(asyncio.CancelledError):
+                await config_listener
             for t in list(self._tasks):
                 t.cancel()
             await self.shutdown_all()
+
+    async def _config_listener_loop(self, stop: asyncio.Event) -> None:
+        """Assina mudanças de secrets/config e reagenda o env dos kernels vivos.
+
+        Isolado num loop com retry: uma queda da conexão de pub/sub não deve
+        derrubar o `kernel-worker` — só reconecta em 2s.
+        """
+        while not stop.is_set():
+            try:
+                async with subscribe_config_events(self.redis) as events:
+                    async for event in events:
+                        if stop.is_set():
+                            break
+                        if event.get("type") == "secret_changed":
+                            await self._refresh_all_envs()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("config listener caiu; reconectando em 2s")
+                await asyncio.sleep(2)
+
+    async def _refresh_all_envs(self) -> None:
+        for sid, sess in list(self.sessions.items()):
+            try:
+                env, secret_values = await resolve_workspace_env(sess.ws_root)
+                sess.env = env
+                sess.secret_values = secret_values
+                await sess.request_env_refresh()
+            except Exception:  # noqa: BLE001
+                logger.exception("falha ao agendar refresh de env do kernel %s", sid)
 
     async def _dispatch(self, op: dict[str, Any]) -> None:
         kind = op.get("op")

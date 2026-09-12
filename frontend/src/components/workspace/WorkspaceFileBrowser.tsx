@@ -1,24 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { fileNodeIcon } from "@/lib/fileIcons";
-import { fileContextEntries, type FileMenuCallbacks } from "@/lib/fileMenu";
+import {
+  batchContextEntries,
+  fileContextEntries,
+  type BatchMenuCallbacks,
+  type FileMenuCallbacks,
+} from "@/lib/fileMenu";
 import { dirName } from "@/lib/workspaceFiles";
 import type { FileNode } from "@/lib/workspace";
 import { useContextMenu } from "@/ui/ContextMenu";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  CloseIcon,
+  DeleteIcon,
   FilePlusIcon,
   FolderPlusIcon,
   MoreIcon,
+  MoveIcon,
   NotebookIcon,
   RefreshIcon,
   SearchIcon,
   UploadIcon,
 } from "@/ui/icons";
 
-const DND_MIME = "application/x-nbp-path";
+const DND_MIME = "application/x-nbp-paths";
 
-interface Props extends FileMenuCallbacks {
+interface Props extends FileMenuCallbacks, BatchMenuCallbacks {
   root: FileNode | undefined;
   loading: boolean;
   /** pasta-alvo para "novo arquivo/pasta/upload" — o último nó de pasta clicado. */
@@ -31,7 +39,11 @@ interface Props extends FileMenuCallbacks {
   activePath: string | null;
   dirtyPaths: Record<string, boolean>;
   onRefresh: () => void;
-  onMoveDrop: (srcPath: string, destDir: string) => void;
+  onMoveDrop: (srcPaths: string[], destDir: string) => void;
+  /** Seleção múltipla (ctrl/shift-click), controlada pelo pai para poder ser
+   * limpa após uma ação em lote (ex.: excluir/mover concluídos). */
+  selectedPaths: Set<string>;
+  onSelectionChange: (paths: Set<string>) => void;
 }
 
 function findDir(root: FileNode | undefined, path: string): FileNode | undefined {
@@ -79,17 +91,32 @@ export function WorkspaceFileBrowser({
   dirtyPaths,
   onRefresh,
   onMoveDrop,
+  selectedPaths,
+  onSelectionChange,
+  onBatchMove,
+  onBatchDelete,
   ...cb
 }: Props) {
   const menuCb: FileMenuCallbacks = cb;
   const { open, menu } = useContextMenu();
   const [query, setQuery] = useState("");
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<string | null>(null);
 
   // se a pasta-alvo sumiu (delete/rename externo), volta pro alvo ser a raiz
   useEffect(() => {
     if (root && currentDir && !findDir(root, currentDir)) setCurrentDir("");
   }, [root, currentDir, setCurrentDir]);
+
+  // Escape limpa a seleção múltipla.
+  useEffect(() => {
+    if (selectedPaths.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onSelectionChange(new Set());
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedPaths.size, onSelectionChange]);
 
   const q = query.trim().toLowerCase();
   const matched = useMemo(() => (root && q ? matchTree(root, q) : null), [root, q]);
@@ -111,16 +138,24 @@ export function WorkspaceFileBrowser({
   const rowMenu = (e: React.MouseEvent, node: FileNode): void => {
     e.preventDefault();
     e.stopPropagation();
+    if (selectedPaths.size > 1 && selectedPaths.has(node.path)) {
+      open(e, batchContextEntries([...selectedPaths], { onBatchMove, onBatchDelete }));
+      return;
+    }
+    if (selectedPaths.size > 0) onSelectionChange(new Set());
     open(e, fileContextEntries(node, menuCb));
   };
 
   const rows: React.ReactNode[] = [];
+  const flatPaths: string[] = [];
   const pushNode = (node: FileNode, depth: number): void => {
     if (matched && !matched.has(node.path)) return;
+    flatPaths.push(node.path);
     const isDir = node.type === "dir";
     const open_ = isDir && isOpen(node);
     const isActive = activePath === node.path;
-    const isSelected = !isActive && currentDir === node.path;
+    const isChosen = selectedPaths.has(node.path);
+    const isSelected = !isActive && !isChosen && currentDir === node.path;
     const isTabbed = openPaths.includes(node.path);
     const isDirty = !!dirtyPaths[node.path];
     rows.push(
@@ -128,7 +163,11 @@ export function WorkspaceFileBrowser({
         key={node.path}
         draggable
         onDragStart={(e) => {
-          e.dataTransfer.setData(DND_MIME, node.path);
+          const dragging =
+            selectedPaths.size > 1 && selectedPaths.has(node.path)
+              ? [...selectedPaths]
+              : [node.path];
+          e.dataTransfer.setData(DND_MIME, JSON.stringify(dragging));
           e.dataTransfer.effectAllowed = "move";
         }}
         onDragOver={
@@ -149,13 +188,37 @@ export function WorkspaceFileBrowser({
                 e.preventDefault();
                 e.stopPropagation();
                 setDropTarget(null);
-                const src = e.dataTransfer.getData(DND_MIME);
-                if (src && src !== node.path) onMoveDrop(src, node.path);
+                const raw = e.dataTransfer.getData(DND_MIME);
+                if (!raw) return;
+                try {
+                  const paths = JSON.parse(raw) as string[];
+                  const filtered = paths.filter((p) => p !== node.path);
+                  if (filtered.length) onMoveDrop(filtered, node.path);
+                } catch {
+                  /* payload inválido — ignora */
+                }
               }
             : undefined
         }
         onClick={(e) => {
           e.stopPropagation();
+          if (e.shiftKey) {
+            const from = anchor ? flatPaths.indexOf(anchor) : flatPaths.indexOf(node.path);
+            const to = flatPaths.indexOf(node.path);
+            const [lo, hi] = from <= to ? [from, to] : [to, from];
+            onSelectionChange(new Set(flatPaths.slice(lo, hi + 1)));
+            return;
+          }
+          if (e.metaKey || e.ctrlKey) {
+            const next = new Set(selectedPaths);
+            if (next.has(node.path)) next.delete(node.path);
+            else next.add(node.path);
+            onSelectionChange(next);
+            setAnchor(node.path);
+            return;
+          }
+          if (selectedPaths.size > 0) onSelectionChange(new Set());
+          setAnchor(node.path);
           openNode(node);
         }}
         onContextMenu={(e) => rowMenu(e, node)}
@@ -165,9 +228,11 @@ export function WorkspaceFileBrowser({
             ? "bg-primary-container text-primary-on-container"
             : dropTarget === node.path
               ? "bg-primary/10 ring-1 ring-inset ring-primary/40"
-              : isSelected
-                ? "bg-surface-variant"
-                : "hover:bg-surface-variant"
+              : isChosen
+                ? "bg-primary/10 ring-1 ring-inset ring-primary/50"
+                : isSelected
+                  ? "bg-surface-variant"
+                  : "hover:bg-surface-variant"
         }`}
         style={{ paddingLeft: 4 + depth * 16 }}
       >
@@ -215,48 +280,82 @@ export function WorkspaceFileBrowser({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* toolbar */}
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-surface-border px-2">
-        <button
-          type="button"
-          title="Novo notebook"
-          className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
-          onClick={() => cb.onNewNotebook(currentDir)}
-        >
-          <NotebookIcon className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          title="Novo arquivo"
-          className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
-          onClick={() => cb.onNewFile(currentDir)}
-        >
-          <FilePlusIcon className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          title="Nova pasta"
-          className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
-          onClick={() => cb.onNewFolder(currentDir)}
-        >
-          <FolderPlusIcon className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          title="Enviar arquivo"
-          className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
-          onClick={() => cb.onUpload(currentDir)}
-        >
-          <UploadIcon className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          title="Recarregar"
-          className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
-          onClick={onRefresh}
-        >
-          <RefreshIcon className="h-4 w-4" />
-        </button>
-      </div>
+      {selectedPaths.size > 0 ? (
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-surface-border bg-primary-container/40 px-2">
+          <span className="text-xs font-medium text-fg">
+            {selectedPaths.size} selecionado{selectedPaths.size > 1 ? "s" : ""}
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              title="Mover para…"
+              className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+              onClick={() => onBatchMove([...selectedPaths])}
+            >
+              <MoveIcon className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Excluir selecionados"
+              className="rounded p-1 text-fg-faint hover:bg-danger/10 hover:text-danger"
+              onClick={() => onBatchDelete([...selectedPaths])}
+            >
+              <DeleteIcon className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Cancelar seleção"
+              className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+              onClick={() => onSelectionChange(new Set())}
+            >
+              <CloseIcon className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-surface-border px-2">
+          <button
+            type="button"
+            title="Novo notebook"
+            className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+            onClick={() => cb.onNewNotebook(currentDir)}
+          >
+            <NotebookIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Novo arquivo"
+            className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+            onClick={() => cb.onNewFile(currentDir)}
+          >
+            <FilePlusIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Nova pasta"
+            className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+            onClick={() => cb.onNewFolder(currentDir)}
+          >
+            <FolderPlusIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Enviar arquivo"
+            className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+            onClick={() => cb.onUpload(currentDir)}
+          >
+            <UploadIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Recarregar"
+            className="rounded p-1 text-fg-faint hover:bg-surface-variant hover:text-fg"
+            onClick={onRefresh}
+          >
+            <RefreshIcon className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* busca */}
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-surface-border px-2">
@@ -274,7 +373,10 @@ export function WorkspaceFileBrowser({
       {/* árvore */}
       <div
         className="min-h-0 flex-1 overflow-auto py-1"
-        onClick={() => setCurrentDir("")}
+        onClick={() => {
+          setCurrentDir("");
+          if (selectedPaths.size > 0) onSelectionChange(new Set());
+        }}
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes(DND_MIME)) {
             e.preventDefault();
@@ -285,8 +387,14 @@ export function WorkspaceFileBrowser({
         onDrop={(e) => {
           e.preventDefault();
           setDropTarget(null);
-          const src = e.dataTransfer.getData(DND_MIME);
-          if (src) onMoveDrop(src, "");
+          const raw = e.dataTransfer.getData(DND_MIME);
+          if (!raw) return;
+          try {
+            const paths = JSON.parse(raw) as string[];
+            if (paths.length) onMoveDrop(paths, "");
+          } catch {
+            /* payload inválido — ignora */
+          }
         }}
       >
         {loading && (

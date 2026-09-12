@@ -14,7 +14,7 @@ import {
   useConfirm,
   useToast,
 } from "@/ui";
-import { AddIcon, DeleteIcon, SecretIcon } from "@/ui/icons";
+import { AddIcon, DeleteIcon, EditIcon, SecretIcon } from "@/ui/icons";
 
 interface SecretMeta {
   key: string;
@@ -50,9 +50,20 @@ export function Secrets() {
     },
   });
 
-  const [dialog, setDialog] = useState(false);
+  const [dialog, setDialog] = useState<{ mode: "create" | "edit"; key: string } | null>(null);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+
+  const openCreate = () => {
+    setDialog({ mode: "create", key: "" });
+    setKey("");
+    setValue("");
+  };
+  const openEdit = (k: string) => {
+    setDialog({ mode: "edit", key: k });
+    setKey(k);
+    setValue("");
+  };
 
   if (user?.role !== "admin") {
     return (
@@ -64,9 +75,10 @@ export function Secrets() {
   }
 
   const submit = async () => {
-    if (!key.trim() || !value) return;
-    await save.mutateAsync({ key: key.trim(), value });
-    setDialog(false);
+    const k = dialog?.mode === "edit" ? dialog.key : key.trim();
+    if (!k || !value) return;
+    await save.mutateAsync({ key: k, value });
+    setDialog(null);
     setKey("");
     setValue("");
   };
@@ -103,13 +115,21 @@ export function Secrets() {
       header: "",
       align: "right",
       render: (s) => (
-        <IconButton
-          label="Excluir"
-          size="sm"
-          danger
-          icon={<DeleteIcon className="h-4 w-4" />}
-          onClick={() => void del(s.key)}
-        />
+        <div className="flex justify-end gap-1">
+          <IconButton
+            label="Editar"
+            size="sm"
+            icon={<EditIcon className="h-4 w-4" />}
+            onClick={() => openEdit(s.key)}
+          />
+          <IconButton
+            label="Excluir"
+            size="sm"
+            danger
+            icon={<DeleteIcon className="h-4 w-4" />}
+            onClick={() => void del(s.key)}
+          />
+        </div>
       ),
     },
   ];
@@ -120,7 +140,7 @@ export function Secrets() {
         title="Secrets"
         subtitle="Cifrados em repouso, injetados como env var e mascarados nos logs. O valor nunca é retornado."
         actions={
-          <Button icon={<AddIcon className="h-4 w-4" />} onClick={() => setDialog(true)}>
+          <Button icon={<AddIcon className="h-4 w-4" />} onClick={openCreate}>
             Novo Secret
           </Button>
         }
@@ -145,15 +165,19 @@ export function Secrets() {
       )}
 
       <Dialog
-        open={dialog}
-        onClose={() => setDialog(false)}
-        title="Novo secret"
+        open={!!dialog}
+        onClose={() => setDialog(null)}
+        title={dialog?.mode === "edit" ? `Editar secret "${dialog.key}"` : "Novo secret"}
         footer={
           <>
-            <Button variant="text" onClick={() => setDialog(false)}>
+            <Button variant="text" onClick={() => setDialog(null)}>
               Cancelar
             </Button>
-            <Button loading={save.isPending} disabled={!key.trim() || !value} onClick={submit}>
+            <Button
+              loading={save.isPending}
+              disabled={dialog?.mode === "edit" ? !value : !key.trim() || !value}
+              onClick={submit}
+            >
               Salvar
             </Button>
           </>
@@ -163,14 +187,20 @@ export function Secrets() {
           <TextField
             label="Chave"
             mono
-            value={key}
+            value={dialog?.mode === "edit" ? dialog.key : key}
             placeholder="API_KEY"
+            disabled={dialog?.mode === "edit"}
             onChange={(e) => setKey(e.target.value)}
           />
           <TextField
             label="Valor"
             type="password"
             value={value}
+            hint={
+              dialog?.mode === "edit"
+                ? "O valor atual nunca é exibido por segurança — informe o novo valor."
+                : undefined
+            }
             onChange={(e) => setValue(e.target.value)}
           />
         </div>

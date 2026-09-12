@@ -114,6 +114,33 @@ class CopyRequest(RenameRequest):
     pass
 
 
+class BatchDeleteRequest(BaseModel):
+    paths: list[str] = Field(min_length=1, max_length=500)
+    recursive: bool = False
+
+
+class BatchMoveItem(BaseModel):
+    src: str = Field(min_length=1, alias="from")
+    dst: str = Field(min_length=1, alias="to")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BatchMoveRequest(BaseModel):
+    items: list[BatchMoveItem] = Field(min_length=1, max_length=500)
+
+
+class BatchItemResult(BaseModel):
+    path: str
+    ok: bool
+    error: str | None = None
+    new_path: str | None = None
+
+
+class BatchResult(BaseModel):
+    results: list[BatchItemResult]
+
+
 class GenerateFileRequest(BaseModel):
     """Geração de arquivo sintético grande no backend (streaming em disco)."""
 

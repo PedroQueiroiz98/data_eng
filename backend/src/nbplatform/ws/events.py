@@ -33,6 +33,11 @@ async def publish_kernel_event(redis: Redis, session_id: str, event: dict[str, A
     await redis.publish(channel, json.dumps(event, default=str))
 
 
+async def publish_config_event(redis: Redis, event: dict[str, Any]) -> None:
+    """Notifica processos vivos (kernel-worker) de mudanças em config global (secrets)."""
+    await redis.publish(get_settings().redis_config_event_channel, json.dumps(event, default=str))
+
+
 async def publish_workspace_event(
     redis: Redis, event: dict[str, Any], *, user_id: str
 ) -> dict[str, Any]:
@@ -93,3 +98,7 @@ def subscribe_kernel_events(redis: Redis, session_id: str) -> _Sub:
 
 def subscribe_workspace_events(redis: Redis, user_id: str) -> _Sub:
     return subscribe_channel(redis, get_settings().workspace_event_channel(user_id))
+
+
+def subscribe_config_events(redis: Redis) -> _Sub:
+    return subscribe_channel(redis, get_settings().redis_config_event_channel)

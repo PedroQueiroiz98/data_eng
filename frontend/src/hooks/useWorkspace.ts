@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  batchDeleteEntries,
+  batchMoveEntries,
   copyEntry,
   deleteEntry,
   generateFile,
@@ -88,6 +90,23 @@ export function useRenameEntry() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ from, to }: { from: string; to: string }) => renameEntry(from, to),
+    onSuccess: () => invalidateWorkspace(qc),
+  });
+}
+
+export function useBatchDeleteEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paths, recursive }: { paths: string[]; recursive?: boolean }) =>
+      batchDeleteEntries(paths, recursive),
+    onSuccess: () => invalidateWorkspace(qc),
+  });
+}
+
+export function useBatchMoveEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: { from: string; to: string }[]) => batchMoveEntries(items),
     onSuccess: () => invalidateWorkspace(qc),
   });
 }

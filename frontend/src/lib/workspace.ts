@@ -97,6 +97,26 @@ export const renameEntry = (from: string, to: string): Promise<FileNode> =>
 export const copyEntry = (from: string, to: string): Promise<FileNode> =>
   apiPost(`/workspace/copy`, { from, to });
 
+export interface BatchItemResult {
+  path: string;
+  ok: boolean;
+  error?: string | null;
+  new_path?: string | null;
+}
+
+export interface BatchResult {
+  results: BatchItemResult[];
+}
+
+export const batchDeleteEntries = (
+  paths: string[],
+  recursive = true,
+): Promise<BatchResult> => apiPost(`/workspace/batch/delete`, { paths, recursive });
+
+export const batchMoveEntries = (
+  items: { from: string; to: string }[],
+): Promise<BatchResult> => apiPost(`/workspace/batch/move`, { items });
+
 export const downloadUrl = (path: string): string =>
   `${API_BASE}/workspace/download?path=${encodeURIComponent(path)}`;
 

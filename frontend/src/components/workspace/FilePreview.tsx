@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { useTheme } from "@/components/ThemeProvider";
+import { useAutosave } from "@/hooks/useAutosave";
 import { useHotkeys } from "@/hooks/useHotkeys";
 import { useWorkspaceFile, useWriteFile } from "@/hooks/useWorkspace";
+import { ApiError } from "@/lib/api";
 import { downloadFile } from "@/lib/workspace";
+import { useWorkspaceStore } from "@/store/workspace";
 import { Button, useToast } from "@/ui";
 import { DownloadIcon, SaveIcon, SpinnerIcon } from "@/ui/icons";
 
@@ -43,6 +46,8 @@ export function FilePreview({ path, onDirtyChange, active = true }: Props) {
   const toast = useToast();
   const { data, isLoading, isError, error } = useWorkspaceFile(path);
   const save = useWriteFile();
+  const autosave = useWorkspaceStore((s) => s.autosave);
+  const etagRef = useRef<string | null>(null);
 
   const [draft, setDraft] = useState<string | null>(null);
   const original = useMemo(() => {
@@ -50,6 +55,10 @@ export function FilePreview({ path, onDirtyChange, active = true }: Props) {
     if (data.kind === "notebook") return JSON.stringify(data.content, null, 1);
     if (data.kind === "text") return (data.content as string) ?? "";
     return "";
+  }, [data]);
+
+  useEffect(() => {
+    etagRef.current = data?.etag ?? null;
   }, [data]);
 
   useEffect(() => {
@@ -68,24 +77,47 @@ export function FilePreview({ path, onDirtyChange, active = true }: Props) {
   const onSave = useCallback(async () => {
     if (draft == null || draft === original) return;
     try {
-      if (isNotebook) {
-        await save.mutateAsync({
-          path,
-          notebook: JSON.parse(draft) as Record<string, unknown>,
-        });
-      } else {
-        await save.mutateAsync({ path, text: draft });
-      }
+      const res = isNotebook
+        ? await save.mutateAsync({
+            path,
+            notebook: JSON.parse(draft) as Record<string, unknown>,
+            ifMatch: etagRef.current,
+          })
+        : await save.mutateAsync({ path, text: draft, ifMatch: etagRef.current });
+      etagRef.current = res.etag ?? null;
       setDraft(null);
       onDirtyChange(path, false);
       toast.success("Salvo");
     } catch (e) {
-      toast.error(`Não foi possível salvar: ${(e as Error).message}`);
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(
+          "O arquivo mudou em disco desde a última leitura. Suas alterações locais foram mantidas — recarregue antes de salvar.",
+        );
+      } else {
+        toast.error(`Não foi possível salvar: ${(e as Error).message}`);
+      }
     }
   }, [draft, original, isNotebook, save, path, onDirtyChange, toast]);
 
   // Ctrl/Cmd+S salva o arquivo de texto/código (só a aba ativa).
   useHotkeys({ "mod+s": () => void onSave() }, active && data?.kind !== "binary");
+
+  // Comando "Salvar" da paleta de comandos (mesmo evento usado pelo notebook editor).
+  useEffect(() => {
+    if (!active) return;
+    const onCmd = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === "save") void onSave();
+    };
+    window.addEventListener("nbp:workspace-command", onCmd as EventListener);
+    return () => window.removeEventListener("nbp:workspace-command", onCmd as EventListener);
+  }, [active, onSave]);
+
+  useAutosave({
+    dirty,
+    enabled: autosave.enabled && active,
+    intervalMs: autosave.intervalMs,
+    onSave,
+  });
 
   if (isLoading) {
     return (

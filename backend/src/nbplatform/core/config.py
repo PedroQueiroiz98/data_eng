@@ -200,6 +200,10 @@ class Settings(BaseSettings):
     def kernel_event_channel(self, session_id: str) -> str:
         return f"{self.redis_kernel_event_prefix}{session_id}"
 
+    # Canal global de mudanças de configuração (ex.: secrets) — assinado pelo
+    # kernel-worker para hot-reload de sessões interativas vivas.
+    redis_config_event_channel: str = "nbp:events:config"
+
     # Prefixos de chaves Redis (mantidos aqui para não espalhar strings mágicas).
     redis_heartbeat_prefix: str = "nbp:heartbeat:"
     redis_queue_executions: str = "nbp:queue:executions"

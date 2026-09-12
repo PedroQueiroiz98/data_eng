@@ -21,6 +21,11 @@ import {
 
 export type CopyKind = "path" | "relative" | "repo" | "read-example";
 
+export interface BatchMenuCallbacks {
+  onBatchMove: (paths: string[]) => void;
+  onBatchDelete: (paths: string[]) => void;
+}
+
 export interface FileMenuCallbacks {
   onOpenFile: (path: string, opts?: { newTab?: boolean }) => void;
   onNewNotebook: (parentDir: string) => void;
@@ -105,5 +110,21 @@ export function fileContextEntries(
     { label: "Duplicar", icon: i(DuplicateIcon), onClick: () => cb.onDuplicate(node) },
     { label: "Baixar", icon: i(DownloadIcon), onClick: () => cb.onDownload(node) },
     { label: "Excluir", icon: i(DeleteIcon), danger: true, onClick: () => cb.onDelete(node) },
+  ];
+}
+
+export function batchContextEntries(
+  paths: string[],
+  cb: BatchMenuCallbacks,
+): ContextMenuEntry[] {
+  return [
+    { label: "Mover para…", onClick: () => cb.onBatchMove(paths) },
+    "separator",
+    {
+      label: `Excluir ${paths.length} itens`,
+      icon: i(DeleteIcon),
+      danger: true,
+      onClick: () => cb.onBatchDelete(paths),
+    },
   ];
 }

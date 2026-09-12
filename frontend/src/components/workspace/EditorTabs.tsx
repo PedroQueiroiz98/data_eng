@@ -76,7 +76,7 @@ export function EditorTabs({
                 tab.kind === "notebook" ? "text-primary" : "text-fg-faint"
               }`}
             />
-            <span className="max-w-[12rem] truncate">{tab.title}</span>
+            <span className={`max-w-[12rem] truncate ${dirty ? "italic" : ""}`}>{tab.title}</span>
             <button
               type="button"
               aria-label="Fechar aba"

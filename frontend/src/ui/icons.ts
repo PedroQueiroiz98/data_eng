@@ -18,6 +18,7 @@ export {
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
   FolderPlus as FolderPlusIcon,
+  FolderInput as MoveIcon,
   File as FileIcon,
   FilePlus as FilePlusIcon,
   FileCode2 as CodeFileIcon,

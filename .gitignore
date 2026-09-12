@@ -9,7 +9,7 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
-
+.pnpm-store
 # uv
 uv.lock
 

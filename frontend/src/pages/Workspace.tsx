@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  useBatchDeleteEntries,
+  useBatchMoveEntries,
   useCopyEntry,
   useDeleteEntry,
   useGenerateFile,
@@ -39,6 +41,7 @@ import {
 import { EditorSurface } from "@/components/workspace/EditorSurface";
 import { EditorTabs } from "@/components/workspace/EditorTabs";
 import { ExecutionPanel } from "@/components/workspace/ExecutionPanel";
+import { FolderPickerDialog } from "@/components/workspace/FolderPickerDialog";
 import { WorkspaceFileBrowser } from "@/components/workspace/WorkspaceFileBrowser";
 import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { Button, Dialog, EmptyState, TextField, useConfirm, useToast } from "@/ui";
@@ -146,12 +149,16 @@ export function Workspace() {
   const copy = useCopyEntry();
   const del = useDeleteEntry();
   const generate = useGenerateFile();
+  const batchDelete = useBatchDeleteEntries();
+  const batchMove = useBatchMoveEntries();
 
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptValue, setPromptValue] = useState("");
   const [currentDir, setCurrentDir] = useState("");
   const [nbDialog, setNbDialog] = useState<{ dir: string } | null>(null);
   const [palette, setPalette] = useState<"files" | "commands" | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [movePicker, setMovePicker] = useState<string[] | null>(null);
   const uploadTarget = useRef<string>("");
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -176,6 +183,69 @@ export function Workspace() {
     (path: string, dirty: boolean) => markDirty(path, dirty),
     [markDirty],
   );
+
+  // ── confirmação de descarte ao fechar aba(s) com alterações pendentes ───────
+  const confirmDiscard = useCallback(
+    (count: number) => {
+      if (count === 0) return Promise.resolve(true);
+      return confirm({
+        title: "Descartar alterações?",
+        message:
+          count === 1
+            ? "Esta aba tem alterações não salvas. Fechar sem salvar irá descartá-las."
+            : `${count} abas têm alterações não salvas. Fechar sem salvar irá descartá-las.`,
+        confirmLabel: "Descartar e fechar",
+        danger: true,
+      });
+    },
+    [confirm],
+  );
+
+  const requestCloseTab = useCallback(
+    async (path: string) => {
+      if (!(await confirmDiscard(dirtyByPath[path] ? 1 : 0))) return;
+      closeTab(path);
+    },
+    [dirtyByPath, confirmDiscard, closeTab],
+  );
+
+  const requestCloseOthers = useCallback(
+    async (path: string) => {
+      const count = view.tabs.filter((t) => t.path !== path && dirtyByPath[t.path]).length;
+      if (!(await confirmDiscard(count))) return;
+      closeOthers(path);
+    },
+    [view.tabs, dirtyByPath, confirmDiscard, closeOthers],
+  );
+
+  const requestCloseRight = useCallback(
+    async (path: string) => {
+      const idx = view.tabs.findIndex((t) => t.path === path);
+      const rightTabs = idx >= 0 ? view.tabs.slice(idx + 1) : [];
+      const count = rightTabs.filter((t) => dirtyByPath[t.path]).length;
+      if (!(await confirmDiscard(count))) return;
+      closeToRight(path);
+    },
+    [view.tabs, dirtyByPath, confirmDiscard, closeToRight],
+  );
+
+  const requestCloseAll = useCallback(async () => {
+    const count = view.tabs.filter((t) => dirtyByPath[t.path]).length;
+    if (!(await confirmDiscard(count))) return;
+    closeAll();
+  }, [view.tabs, dirtyByPath, confirmDiscard, closeAll]);
+
+  // ── aviso do navegador ao sair com alterações pendentes ─────────────────────
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (dirtyCount > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirtyCount]);
 
   // ── criação ────────────────────────────────────────────────────────────────
   const createNotebook = (path: string, language: NotebookLanguage) => {
@@ -295,31 +365,76 @@ export function Workspace() {
     });
   };
 
-  const onMove = (node: FileNode) => {
-    const parent = dirName(node.path);
-    openPrompt({
-      title: `Mover ${node.name}`,
-      label: "Pasta de destino",
-      initial: parent,
-      confirmLabel: "Mover",
-      hint: "Caminho relativo à raiz do workspace (vazio = raiz).",
-      onSubmit: (dest) => onMoveDrop(node.path, dest.trim().replace(/\/+$/, "")),
-    });
+  const onMove = (node: FileNode) => setMovePicker([node.path]);
+
+  const onMoveDrop = async (srcPaths: string[], destDir: string) => {
+    const valid = srcPaths.filter(
+      (src) => destDir !== dirName(src) && destDir !== src && !destDir.startsWith(`${src}/`),
+    );
+    if (!valid.length) return;
+    const items = valid.map((src) => ({ from: src, to: joinPath(destDir, baseName(src)) }));
+    try {
+      const { results } = await batchMove.mutateAsync(items);
+      const ok = results.filter((r) => r.ok);
+      const failed = results.filter((r) => !r.ok);
+      for (const r of ok) {
+        const to = items.find((it) => it.from === r.path)?.to;
+        if (to) renamePrefix(r.path, to);
+      }
+      if (ok.length && destDir) setExpanded(destDir, true);
+      setSelectedPaths(new Set());
+      if (failed.length === 0) {
+        if (ok.length > 1) toast.success(`${ok.length} item(ns) movido(s).`);
+      } else if (ok.length === 0) {
+        toast.error(`Falha ao mover: ${failed[0]?.error}`);
+      } else {
+        toast.error(`${ok.length} movido(s), ${failed.length} falharam.`);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
-  const onMoveDrop = (src: string, destDir: string) => {
-    if (destDir === dirName(src) || destDir === src || destDir.startsWith(`${src}/`)) return;
-    const to = joinPath(destDir, baseName(src));
-    rename.mutate(
-      { from: src, to },
-      {
-        onSuccess: () => {
-          renamePrefix(src, to);
-          if (destDir) setExpanded(destDir, true);
-        },
-        onError: (e) => toast.error((e as Error).message),
-      },
-    );
+  const onBatchMove = (paths: string[]) => setMovePicker(paths);
+
+  const onBatchDelete = async (paths: string[]) => {
+    const ok = await confirm({
+      title: `Excluir ${paths.length} itens?`,
+      message: (
+        <>
+          <p>Os itens abaixo serão removidos. Esta ação não pode ser desfeita.</p>
+          <ul className="mt-2 max-h-40 list-disc overflow-auto pl-5 font-mono text-xs">
+            {paths.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        </>
+      ),
+      confirmLabel: "Excluir",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const { results } = await batchDelete.mutateAsync({ paths, recursive: true });
+      const okPaths = results.filter((r) => r.ok).map((r) => r.path);
+      const failed = results.filter((r) => !r.ok);
+      for (const p of okPaths) {
+        for (const tab of openPaths) {
+          if (tab === p || tab.startsWith(`${p}/`)) closeTab(tab, { forget: true });
+        }
+        forgetUnder(p);
+      }
+      setSelectedPaths(new Set());
+      if (failed.length === 0) {
+        toast.success(`${okPaths.length} item(ns) excluído(s).`);
+      } else if (okPaths.length === 0) {
+        toast.error(`Falha ao excluir: ${failed[0]?.error}`);
+      } else {
+        toast.error(`${okPaths.length} excluído(s), ${failed.length} falharam.`);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   const onDuplicate = async (node: FileNode) => {
@@ -545,7 +660,7 @@ export function Workspace() {
         toggleExplorer();
         break;
       case "cmd:close-tab":
-        if (view.activeTab) closeTab(view.activeTab);
+        if (view.activeTab) void requestCloseTab(view.activeTab);
         break;
       case "cmd:reopen-tab":
         reopenClosed();
@@ -641,6 +756,10 @@ export function Workspace() {
                 onRun={onRun}
                 onExport={onExport}
                 onMoveDrop={onMoveDrop}
+                selectedPaths={selectedPaths}
+                onSelectionChange={setSelectedPaths}
+                onBatchMove={onBatchMove}
+                onBatchDelete={onBatchDelete}
               />
             </aside>
             <div
@@ -660,10 +779,10 @@ export function Workspace() {
               activeTab={view.activeTab}
               dirtyByPath={dirtyByPath}
               onSelect={setActiveTab}
-              onClose={closeTab}
-              onCloseOthers={closeOthers}
-              onCloseRight={closeToRight}
-              onCloseAll={closeAll}
+              onClose={(path) => void requestCloseTab(path)}
+              onCloseOthers={(path) => void requestCloseOthers(path)}
+              onCloseRight={(path) => void requestCloseRight(path)}
+              onCloseAll={() => void requestCloseAll()}
               onReopen={reopenClosed}
               onReorder={reorderTabs}
             />
@@ -718,6 +837,17 @@ export function Workspace() {
         onCreate={createNotebook}
       />
 
+      <FolderPickerDialog
+        open={!!movePicker}
+        root={tree.data}
+        excludePrefixes={movePicker ?? []}
+        initialDir={movePicker?.length === 1 ? dirName(movePicker[0] ?? "") : ""}
+        onClose={() => setMovePicker(null)}
+        onConfirm={(destDir) => {
+          if (movePicker) void onMoveDrop(movePicker, destDir);
+        }}
+      />
+
       <Dialog
         open={!!prompt}
         onClose={() => setPrompt(null)}
@@ -728,10 +858,10 @@ export function Workspace() {
               Cancelar
             </Button>
             <Button
-              disabled={!promptValue.trim() && prompt?.title.startsWith("Mover") !== true}
+              disabled={!promptValue.trim()}
               onClick={() => {
                 const v = promptValue.trim();
-                if (!v && prompt?.title.startsWith("Mover") !== true) return;
+                if (!v) return;
                 prompt?.onSubmit(v);
                 setPrompt(null);
               }}

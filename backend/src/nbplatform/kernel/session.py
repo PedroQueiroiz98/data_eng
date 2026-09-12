@@ -27,6 +27,7 @@ RpcFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 _STOP = {"op": "__stop__"}
 _RESTART = {"op": "__restart__"}
+_ENV_REFRESH = {"op": "__env_refresh__"}
 
 
 class KernelSession:
@@ -35,6 +36,7 @@ class KernelSession:
         session_id: str,
         *,
         cwd: str,
+        ws_root: str,
         env: dict[str, str],
         secret_values: list[str],
         startup_timeout: float,
@@ -43,6 +45,7 @@ class KernelSession:
     ) -> None:
         self.session_id = session_id
         self.cwd = cwd
+        self.ws_root = ws_root
         self.env = env
         self.secret_values = secret_values
         self.startup_timeout = startup_timeout
@@ -70,6 +73,14 @@ class KernelSession:
 
     async def request_restart(self) -> None:
         await self.queue.put(dict(_RESTART))
+
+    async def request_env_refresh(self) -> None:
+        """Reinicia o kernel para aplicar `self.env` atualizado (ex.: secret editado).
+
+        Enfileirado na mesma fila serial de células — se o kernel estiver
+        ocupado, só roda depois que a célula em execução terminar.
+        """
+        await self.queue.put(dict(_ENV_REFRESH))
 
     async def stop_worker(self) -> None:
         await self.queue.put(dict(_STOP))
@@ -105,6 +116,9 @@ class KernelSession:
                 return
             if op == "__restart__":
                 await self._do_restart(emit)
+                continue
+            if op == "__env_refresh__":
+                await self._do_env_refresh(emit)
                 continue
             if op in ("__complete__", "__inspect__"):
                 # introspecção (não executa código); nunca derruba a sessão
@@ -152,6 +166,41 @@ class KernelSession:
         self.status = "idle"
         self.last_activity = time.time()
         await emit({"type": "kernel.status", "status": "idle", "restarted": True})
+
+    async def _do_env_refresh(self, emit: EmitFn) -> None:
+        """Aplica `self.env` atualizado (ex.: secret editado) via shutdown + start.
+
+        Diferente de `_do_restart`/`restart_kernel()`, que reaproveita o env
+        capturado no `start()` original — aqui precisamos de um processo novo
+        porque não há como trocar env vars de um processo Python já vivo.
+        """
+        assert self.km is not None
+        await emit({"type": "kernel.status", "status": "restarting", "reason": "secrets_updated"})
+        with contextlib.suppress(Exception):
+            if self.kc:
+                self.kc.stop_channels()
+        await self.km.shutdown_kernel(now=False)
+        full_env = {**os.environ, **self.env}
+        await self.km.start_kernel(cwd=self.cwd, env=full_env)
+        self.kc = self.km.client()
+        self.kc.start_channels()
+        try:
+            await self.kc.wait_for_ready(timeout=self.startup_timeout)
+        except Exception as exc:  # noqa: BLE001
+            self.status = "dead"
+            await emit({"type": "kernel.status", "status": "dead", "reason": str(exc)})
+            return
+        self.execution_count = 0
+        self.status = "idle"
+        self.last_activity = time.time()
+        await emit(
+            {
+                "type": "kernel.status",
+                "status": "idle",
+                "restarted": True,
+                "reason": "secrets_updated",
+            }
+        )
 
     async def _run_one(self, cell_id: str, code: str, request_id: str, emit: EmitFn) -> None:
         assert self.kc is not None
