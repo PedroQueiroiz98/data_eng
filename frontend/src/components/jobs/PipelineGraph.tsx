@@ -20,11 +20,13 @@ interface Props {
   dependencies: { from: string; to: string }[];
   selectedId: string | null;
   onSelect: (task: JobTask) => void;
+  runningStepByTask?: Record<string, string>; // job_task_id -> "Executando célula 12"
 }
 
 interface Data {
   task: JobTask;
   selected: boolean;
+  runningStep?: string;
   [key: string]: unknown;
 }
 
@@ -37,7 +39,7 @@ const BORDER: Record<string, string> = {
 };
 
 function TaskFlowNode({ data }: NodeProps) {
-  const { task, selected } = data as unknown as Data;
+  const { task, selected, runningStep } = data as unknown as Data;
   return (
     <div
       className={`w-56 rounded-md border border-t-4 bg-surface px-3 py-2 shadow-e1 ${
@@ -56,6 +58,9 @@ function TaskFlowNode({ data }: NodeProps) {
       {task.notebook_name && (
         <div className="truncate text-[11px] text-fg-faint">{task.notebook_name}</div>
       )}
+      {task.status === "RUNNING" && runningStep && (
+        <div className="mt-0.5 truncate text-[11px] text-danger">{runningStep}</div>
+      )}
       <Handle type="source" position={Position.Right} className="!bg-fg-faint" />
     </div>
   );
@@ -63,7 +68,7 @@ function TaskFlowNode({ data }: NodeProps) {
 
 const nodeTypes = { task: TaskFlowNode };
 
-function Inner({ tasks, dependencies, selectedId, onSelect }: Props) {
+function Inner({ tasks, dependencies, selectedId, onSelect, runningStepByTask }: Props) {
   const { theme } = useTheme();
 
   const { nodes, edges } = useMemo(() => {
@@ -79,7 +84,11 @@ function Inner({ tasks, dependencies, selectedId, onSelect }: Props) {
           id: t.workflow_task_id,
           type: "task",
           position: { x, y },
-          data: { task: t, selected: t.id === selectedId } as unknown as Record<string, unknown>,
+          data: {
+            task: t,
+            selected: t.id === selectedId,
+            runningStep: runningStepByTask?.[t.id],
+          } as unknown as Record<string, unknown>,
         });
       });
     });
@@ -92,7 +101,7 @@ function Inner({ tasks, dependencies, selectedId, onSelect }: Props) {
         animated: false,
       }));
     return { nodes: ns, edges: es };
-  }, [tasks, dependencies, selectedId]);
+  }, [tasks, dependencies, selectedId, runningStepByTask]);
 
   const byWtid = useMemo(
     () => new Map(tasks.map((t) => [t.workflow_task_id, t])),

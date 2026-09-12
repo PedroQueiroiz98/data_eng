@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LogTerminal } from "@/components/LogTerminal";
@@ -26,6 +27,7 @@ const RETRYABLE_TASK = new Set(["FAILED", "CANCELLED", "SKIPPED"]);
 export function JobDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
   const cancel = useCancelJob(id);
@@ -68,11 +70,16 @@ export function JobDetail() {
           { seq: l.seq, ts: "", level: "INFO", message: l.message, job_task_id: l.job_task_id },
         ]);
       },
-      onStatus: (s) => setStatus(s),
-      onProgress: () => {},
+      onStatus: (s) => {
+        setStatus(s);
+        void qc.invalidateQueries({ queryKey: ["jobs", id] });
+      },
+      onProgress: () => {
+        void qc.invalidateQueries({ queryKey: ["jobs", id] });
+      },
     });
     return close;
-  }, [id, nonce]);
+  }, [id, nonce, qc]);
 
   // relógio para o tempo decorrido de jobs em execução
   useEffect(() => {
@@ -81,11 +88,11 @@ export function JobDetail() {
     return () => clearInterval(t);
   }, [effective]);
 
-  const shownTasks = tasks.length ? tasks : (rest?.tasks ?? []);
+  const shownTasks = rest?.tasks?.length ? rest.tasks : tasks;
   const dependencies = useMemo(
     () =>
-      (wsJob?.dependencies as { from: string; to: string }[] | undefined) ??
       rest?.dependencies ??
+      (wsJob?.dependencies as { from: string; to: string }[] | undefined) ??
       [],
     [wsJob, rest],
   );
@@ -95,18 +102,18 @@ export function JobDetail() {
   );
 
   const pipelineName =
-    (wsJob?.workflow_name as string) || rest?.workflow_name || id.slice(0, 8);
-  const startedBy = (wsJob?.started_by as string) ?? rest?.started_by ?? null;
+    rest?.workflow_name || (wsJob?.workflow_name as string) || id.slice(0, 8);
+  const startedBy = rest?.started_by ?? (wsJob?.started_by as string) ?? null;
   const parameters = useMemo(
     () =>
-      (wsJob?.parameters as Record<string, unknown> | undefined) ?? rest?.parameters ?? {},
+      rest?.parameters ?? (wsJob?.parameters as Record<string, unknown> | undefined) ?? {},
     [wsJob, rest],
   );
-  const startedAt = (wsJob?.started_at as string) ?? rest?.started_at ?? null;
-  const finishedAt = (wsJob?.finished_at as string) ?? rest?.finished_at ?? null;
-  const durationMs = (wsJob?.duration_ms as number) ?? rest?.duration_ms ?? null;
-  const trigger = (wsJob?.trigger_type as string) ?? rest?.trigger_type ?? "MANUAL";
-  const workflowId = (wsJob?.workflow_id as string) ?? rest?.workflow_id ?? "";
+  const startedAt = rest?.started_at ?? (wsJob?.started_at as string) ?? null;
+  const finishedAt = rest?.finished_at ?? (wsJob?.finished_at as string) ?? null;
+  const durationMs = rest?.duration_ms ?? (wsJob?.duration_ms as number) ?? null;
+  const trigger = rest?.trigger_type ?? (wsJob?.trigger_type as string) ?? "MANUAL";
+  const workflowId = rest?.workflow_id ?? (wsJob?.workflow_id as string) ?? "";
 
   // seleção default: 1ª running, senão 1ª failed
   useEffect(() => {
@@ -305,6 +312,7 @@ export function JobDetail() {
                 dependencies={dependencies}
                 selectedId={selectedTaskId}
                 onSelect={(t) => setSelectedTaskId(t.id)}
+                runningStepByTask={runningStepByTask}
               />
             ) : (
               <p className="px-4 py-6 text-sm text-fg-faint">Sem tarefas.</p>

@@ -1,4 +1,8 @@
+import { useEffect, useRef, useState } from "react";
+import { LogTerminal } from "@/components/LogTerminal";
+import type { ExecutionLog } from "@/lib/executions";
 import { fmtClock, fmtDuration, type JobTask } from "@/lib/jobs";
+import { openExecutionSocket } from "@/lib/ws";
 import { StatusIcon } from "@/ui";
 import { NotebookIcon, RetryIcon } from "@/ui/icons";
 
@@ -7,6 +11,40 @@ interface Props {
   selectedId: string | null;
   onSelect: (task: JobTask) => void;
   runningStepByTask?: Record<string, string>; // job_task_id -> "Executando célula 12"
+}
+
+// log de execução do notebook (papermill/kernel) da tarefa, ao vivo via /ws/executions/{id}
+function TaskExecutionLog({ executionId }: { executionId: string }) {
+  const [logs, setLogs] = useState<ExecutionLog[]>([]);
+  const seen = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    seen.current = new Set();
+    setLogs([]);
+    const close = openExecutionSocket(executionId, {
+      onSnapshot: (e) => {
+        for (const l of e.logs) seen.current.add(l.seq);
+        setLogs(e.logs);
+      },
+      onLog: (l) => {
+        if (seen.current.has(l.seq)) return;
+        seen.current.add(l.seq);
+        setLogs((prev) => [...prev, l]);
+      },
+    });
+    return close;
+  }, [executionId]);
+
+  if (logs.length === 0) {
+    return <p className="py-2 text-xs text-fg-faint">Sem log do notebook ainda.</p>;
+  }
+  return (
+    <LogTerminal
+      title="Log do notebook"
+      lines={logs.map((l) => ({ seq: l.seq, level: l.level, message: l.message, ts: l.ts }))}
+      filename={`execution-${executionId.slice(0, 8)}.txt`}
+    />
+  );
 }
 
 export function TaskTimeline({ tasks, selectedId, onSelect, runningStepByTask }: Props) {
@@ -53,7 +91,7 @@ export function TaskTimeline({ tasks, selectedId, onSelect, runningStepByTask }:
                     <span className="block h-1 overflow-hidden rounded bg-info/20">
                       <span className="block h-full w-full origin-left animate-indeterminate rounded bg-info" />
                     </span>
-                    {step && <span className="mt-0.5 block text-[11px] text-info">{step}</span>}
+                    {step && <span className="mt-0.5 block text-[11px] text-danger">{step}</span>}
                   </span>
                 )}
                 {failed && t.error_message && (
@@ -65,6 +103,17 @@ export function TaskTimeline({ tasks, selectedId, onSelect, runningStepByTask }:
                 {t.started_at && <span>{fmtClock(t.started_at)}</span>}
               </span>
             </button>
+            {on && (
+              <div className="border-t border-surface-border bg-surface-variant/30 px-3 py-2">
+                {t.execution_id ? (
+                  <TaskExecutionLog executionId={t.execution_id} />
+                ) : (
+                  <p className="py-2 text-xs text-fg-faint">
+                    Notebook ainda não começou a executar.
+                  </p>
+                )}
+              </div>
+            )}
           </li>
         );
       })}
